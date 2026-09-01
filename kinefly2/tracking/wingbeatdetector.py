@@ -157,7 +157,7 @@ class WingbeatDetector(object):
             (fbb_min, fbb_max) = self.get_baseband_range(fs, m)
         else:
             fbb_min = 0.0
-            fbb_max = np.Inf
+            fbb_max = np.inf
 
         
         return (bValid, np.array([fbb_min, fbb_max]))
