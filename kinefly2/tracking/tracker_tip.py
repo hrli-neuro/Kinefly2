@@ -3,11 +3,11 @@
 import cv2
 import numpy as np
 
-from imagewindow import ImageWindow
-import imageprocessing
-from bodypart_motion import MotionTrackedBodypartPolar
+from .imagewindow import ImageWindow
+from . import imageprocessing
+from .bodypart_motion import MotionTrackedBodypartPolar
 
-from MsgFlyState import MsgState
+from .MsgFlyState import MsgState
 
 
 

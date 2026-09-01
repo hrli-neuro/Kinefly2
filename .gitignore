@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+logs/
+tests/videos/*.avi
+tests/videos/*.csv
+tests/videos/*.yaml
+config/background_*.png

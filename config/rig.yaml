@@ -1,0 +1,16 @@
+# Rig-level configuration for run_rig.py.
+# Camera YAML paths are relative to this file.
+cameras:
+  bottom: camera_bottom.yaml   # Bottom view: L/R wing stroke amplitude + head yaw.
+  front: camera_front.yaml     # Front view: wing-envelope roll + head roll.
+primary: bottom                # This camera's updates drive the merged output.
+use_gui: true
+zmq_port: 5556                 # Merged fly state published as JSON on tcp://*:5556.
+log_dir: ../logs               # HDF5 fly-state logs (created if missing).
+
+# --- Future LED-panel closed-loop output (arena not set up yet) -------------
+# panels:
+#   port: /dev/serial/by-id/usb-FTDI-...
+#   pattern_id: 1
+#   mode: position            # or velocity
+#   coefficients: {x0: 0, xl1: 10, xr1: -10}   # e.g. stripe follows L-R WSA

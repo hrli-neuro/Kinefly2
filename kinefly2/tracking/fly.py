@@ -3,16 +3,16 @@
 import cv2
 import numpy as np
 
-from imagewindow import ImageWindow
-from tracker_axis import AxisTracker
-from tracker_area import AreaTracker
-from tracker_edge import EdgeTrackerByIntensityProfile, EdgeTrackerByHoughTransform
-from tracker_tip import TipTracker
-from tracker_intensity import IntensityTracker
-import ui
-import imageprocessing
+from .imagewindow import ImageWindow
+from .tracker_axis import AxisTracker
+from .tracker_area import AreaTracker
+from .tracker_edge import EdgeTrackerByIntensityProfile, EdgeTrackerByHoughTransform
+from .tracker_tip import TipTracker
+from .tracker_intensity import IntensityTracker
+from . import ui
+from . import imageprocessing
 
-from MsgFlyState import MsgFlyState, MsgState , Header
+from .MsgFlyState import MsgFlyState, MsgState , Header
 
 
 ###############################################################################
@@ -214,29 +214,21 @@ class Fly(object):
                 #self.bInvertColorValid = True
 
             
-            # Get the dt.  Keep track of both the camera timestamp, and the now() timestamp,
-            # and use the now() timestamp only if the camera timestamp isn't changing.
+            # Get the dt from the header timestamps (seconds).  The background-model
+            # time constant and the wingbeat detector both depend on real dt values.
             self.stamp = self.header.stamp
-            #stampAlt = rospy.Time.now()
-            stampAlt = 0
 
             if (self.stampPrev is not None):
-                #dt = max(0.0, (self.header.stamp - self.stampPrev).to_sec())
-                dt = 1
-                # If the camera is not giving good timestamps, then use our own clock.
-                if (dt == 0.0):
-                    dt = max(0.0, (stampAlt - self.stampPrevAlt).to_sec())
-                    self.stamp = stampAlt
+                dt = max(0.0, self.stamp - self.stampPrev)
 
-                # If time wrapped, then just assume a value.
+                # If the source is not giving good timestamps, then just assume a value.
                 if (dt == 0.0):
                     dt = 1.0
-                    
+
             else:
                 dt = np.inf
 
-            self.stampPrev = self.header.stamp
-            self.stampPrevAlt = stampAlt
+            self.stampPrev = self.stamp
 
             self.head.update(dt, image, self.bInvertColor)
             self.abdomen.update(dt, image, self.bInvertColor)
@@ -289,10 +281,9 @@ class Fly(object):
         else:
             flystate.aux      = MsgState()
 
-        #print(flystate.head.angles)
         self.iCount += 1
-        
-        #self.pubFlystate.publish(flystate)
+
+        return flystate
         
 
 

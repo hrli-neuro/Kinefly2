@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kinefly2"
+version = "0.1.0"
+description = "ROS-free real-time tethered-fly kinematics tracker (Kinefly/Benifly port)"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "pyyaml",
+    "pyzmq",
+    "h5py",
+]
+
+[project.optional-dependencies]
+# PySpin (FLIR Spinnaker) is not on PyPI: install the spinnaker_python wheel
+# from flir.com matching the rig's Python version.
+panels = ["pyserial"]
+
+[tool.setuptools.packages.find]
+include = ["kinefly2*"]

@@ -5,9 +5,9 @@ import cv2
 import numpy as np
 import threading
 
-from imagewindow import ImageWindow
-import imageprocessing
-import ui
+from .imagewindow import ImageWindow
+from . import imageprocessing
+from . import ui
 
 class Struct:
     pass
@@ -361,7 +361,7 @@ class MotionTrackedBodypart(object):
         
         # Check for handle hits.
         if (self.params['gui'][self.name]['track']):
-            for tagHandle,handle in self.handles.iteritems():
+            for tagHandle,handle in self.handles.items():
                 if (handle.hit_test(ptMouse)):
                     tag = tagHandle
                     break
@@ -377,7 +377,7 @@ class MotionTrackedBodypart(object):
     def draw_handles(self, image):
         # Draw all handle points, or only just the hinge handle.
         if (self.params['gui'][self.name]['track']):
-            for tagHandle,handle in self.handles.iteritems():
+            for tagHandle,handle in self.handles.items():
                 handle.draw(image)
         else:
             tagHandle,handle = ('hinge',self.handles['hinge'])

@@ -3,8 +3,8 @@
 import cv2
 import numpy as np
 
-import ui
-import imageprocessing
+from . import ui
+from . import imageprocessing
 
 
 ###############################################################################
@@ -90,7 +90,7 @@ class AxisTracker:
         tag = None
         
         # Check for handle hits.
-        for tagHandle,handle in self.handles.iteritems():
+        for tagHandle,handle in self.handles.items():
             if (handle.hit_test(ptMouse)):
                 tag = tagHandle
                 break
@@ -100,7 +100,7 @@ class AxisTracker:
 
     def draw_handles(self, image):
         # Draw all handle points.
-        for tagHandle,handle in self.handles.iteritems():
+        for tagHandle,handle in self.handles.items():
             handle.draw(image)
 
     

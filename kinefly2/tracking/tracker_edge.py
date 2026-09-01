@@ -4,10 +4,10 @@ import copy
 import cv2
 import numpy as np
 
-from imagewindow import ImageWindow
-from bodypart_motion import MotionTrackedBodypart, MotionTrackedBodypartPolar
+from .imagewindow import ImageWindow
+from .bodypart_motion import MotionTrackedBodypart, MotionTrackedBodypartPolar
 
-from MsgFlyState import MsgState
+from .MsgFlyState import MsgState
 
 
 ###############################################################################

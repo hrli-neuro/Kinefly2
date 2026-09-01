@@ -17,10 +17,10 @@ class MsgState:
         self.intensity      = []
 
 class Header:
-    def __init__(self, seq, stamp, frame_id):
-        self.seq            = []
-        self.stamp          = []
-        self.frame_id       = []
+    def __init__(self, seq=0, stamp=0.0, frame_id=''):
+        self.seq            = seq
+        self.stamp          = stamp      # Seconds (float); camera timestamp when available.
+        self.frame_id       = frame_id
 
 class Rosimg:
     def __init__(self, header, height, width, encoding, is_bigendian, step, data):

@@ -1,0 +1,15 @@
+# Front-view camera: wing-envelope roll + head roll.
+# In this view the "left"/"right" edge trackers measure the wing envelope's
+# roll edges and the "head" area tracker measures head roll.
+name: front
+camera:
+  # For the rig (FLIR/Spinnaker):
+  #   kind: pyspin
+  #   serial: "87654321"
+  #   fps: 90
+  #   exposure_us: 2000
+  #   gain_db: 10
+  kind: video
+  path: ../tests/videos/synthetic_bottom.avi   # Placeholder until a front-view recording exists.
+  pace: false
+  loop: false

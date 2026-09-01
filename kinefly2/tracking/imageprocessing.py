@@ -43,7 +43,8 @@ def get_intersection(pt1a, pt1b, pt2a, pt2b):
 # get_projection_onto_axis()
 # Project the given point onto the axis.
 #
-def get_projection_onto_axis(ptAnywhere, (ptAxisBase, ptAxisHead)):
+def get_projection_onto_axis(ptAnywhere, axis):
+    (ptAxisBase, ptAxisHead) = axis
     # Project the point onto the body axis.
     ptB = ptAxisHead - ptAxisBase
     ptM = ptAnywhere - ptAxisBase
@@ -52,7 +53,8 @@ def get_projection_onto_axis(ptAnywhere, (ptAxisBase, ptAxisHead)):
     return ptAxis
     
             
-def get_reflection_across_axis(ptAnywhere, (ptAxisBase, ptAxisHead)):
+def get_reflection_across_axis(ptAnywhere, axis):
+    (ptAxisBase, ptAxisHead) = axis
     ptAxis = get_projection_onto_axis(ptAnywhere, (ptAxisBase, ptAxisHead))
     ptReflected = ptAnywhere + 2*(ptAxis-ptAnywhere)
     
@@ -177,7 +179,8 @@ class PolarTransforms(object):
         return imgTransformed
 
 
-    def _get_transform_polar_elliptical(self, i_0, j_0, i_n, j_n, (raxial, rortho), drStrip, angleEllipse, nRho, nTheta, theta_0, theta_1, rClip):
+    def _get_transform_polar_elliptical(self, i_0, j_0, i_n, j_n, radii, drStrip, angleEllipse, nRho, nTheta, theta_0, theta_1, rClip):
+        (raxial, rortho) = radii
         nTheta = max(1,nTheta)
         transform = self._transforms.get((i_0, j_0, i_n, j_n, nRho, drStrip, nTheta, theta_0, theta_1, rClip))
     

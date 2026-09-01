@@ -1,0 +1,22 @@
+# Bottom-view camera: L/R wing stroke amplitude + head yaw.
+#
+# Head-yaw tip: if the antennae are visible from below, set the head tracker
+# to 'edge' (tracker: edge under tracker: head:) and place a narrow annulus
+# (radius_inner/radius_outer just bracketing the antennae) so the antenna edge
+# is tracked like a wing leading edge -- often cleaner than whole-head 'area'
+# registration. Both are available per camera; compare on real video.
+name: bottom
+camera:
+  # For the rig (FLIR/Spinnaker):
+  #   kind: pyspin
+  #   serial: "12345678"
+  #   fps: 90
+  #   exposure_us: 2000
+  #   gain_db: 10
+  # For development, play a recorded video:
+  kind: video
+  path: ../tests/videos/synthetic_bottom.avi
+  pace: false
+  loop: false
+# tracker: section is created/updated by the GUI (hinges, radii, angles,
+# thresholds). Delete it to start over from defaults.
