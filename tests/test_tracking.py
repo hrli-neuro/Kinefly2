@@ -25,8 +25,9 @@ TRUTH = os.path.join(HERE, 'videos', 'synthetic_bottom_truth.csv')
 
 
 def ensure_synthetic():
-    if not (os.path.exists(VID_CFG) and os.path.exists(TRUTH)):
-        subprocess.check_call([sys.executable, os.path.join(HERE, 'make_synthetic_video.py')])
+    # Always regenerate: interactive GUI runs on the synthetic config save
+    # their edits back into the YAML, which would silently change this test.
+    subprocess.check_call([sys.executable, os.path.join(HERE, 'make_synthetic_video.py')])
 
 
 def run_tracker():
