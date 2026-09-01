@@ -4,4 +4,4 @@ logs/
 tests/videos/*.avi
 tests/videos/*.csv
 tests/videos/*.yaml
-config/background_*.png
+background_*.png
