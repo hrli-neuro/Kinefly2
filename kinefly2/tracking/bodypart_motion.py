@@ -550,7 +550,7 @@ class MotionTrackedBodypartPolar(MotionTrackedBodypart):
                                                          angleEllipse=self.angleBodypart_i,
                                                          theta_0 = min(theta_0a,theta_1a), 
                                                          theta_1 = max(theta_0a,theta_1a),
-                                                         amplifyTheta = 1.0)
+                                                         amplifyTheta = self.params[self.name].get('polar_amplify', 1.0))
             except imageprocessing.TransformException:
                 #rospy.logwarn('%s: Mask is outside the image, no points transformed.' % self.name)
                 print('%s: Mask is outside the image, no points transformed.' % self.name)
@@ -582,7 +582,7 @@ class MotionTrackedBodypartPolar(MotionTrackedBodypart):
                                                              angleEllipse=self.angleBodypart_i,
                                                              theta_0 = min(theta_0a,theta_1a), 
                                                              theta_1 = max(theta_0a,theta_1a),
-                                                             amplifyTheta = 1.0)
+                                                             amplifyTheta = self.params[self.name].get('polar_amplify', 1.0))
                 except imageprocessing.TransformException:
                     pass
                 

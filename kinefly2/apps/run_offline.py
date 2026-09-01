@@ -20,6 +20,38 @@ from ..gui.app import TrackerView
 import yaml
 
 
+def make_median_background(name, config_path, cam_cfg, n_samples=41):
+    """Median of frames sampled across the whole video: anything that moves
+    (wings, legs) vanishes; the static scene remains."""
+    import os
+
+    import numpy as np
+
+    cam_cfg = dict(cam_cfg, loop=False, pace=False)
+    source = make_source(cam_cfg)
+    source.open()
+    # Keep ~n_samples frames spread over the video without holding it all in
+    # memory: double the sampling stride whenever the kept set grows too big.
+    kept, stride, i = [], 1, 0
+    for frame in iter(source.read, None):
+        if i % stride == 0:
+            kept.append(frame.image)
+            if len(kept) >= 2 * n_samples:
+                kept = kept[::2]
+                stride *= 2
+        i += 1
+    source.close()
+    if not kept:
+        print('No frames in the video.')
+        return 1
+    bg = np.median(np.stack(kept), axis=0).astype('uint8')
+    out = os.path.join(os.path.dirname(os.path.abspath(config_path)),
+                       'background_%s.png' % name)
+    cv2.imwrite(out, bg)
+    print('Wrote %s (median of %d of %d frames)' % (out, len(kept), i))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('config', help='Per-camera YAML (with camera: and tracker: sections)')
@@ -29,6 +61,12 @@ def main():
     ap.add_argument('--loop', action='store_true', help='Loop the video')
     ap.add_argument('--pace', action='store_true', help='Play at the video frame rate')
     ap.add_argument('--no-gui', action='store_true')
+    ap.add_argument('--make-bg', action='store_true',
+                    help='Compute a background image as the temporal median of '
+                         'the video (the moving wings/legs vanish, the static '
+                         'body/tether/illumination stay), save it as this '
+                         "camera's background, and exit. Then enable "
+                         "'subtract' for the wings in the GUI.")
     args = ap.parse_args()
 
     with open(args.config) as f:
@@ -43,6 +81,10 @@ def main():
         cam_cfg['pace'] = True
 
     name = args.name or config.get('name') or 'camera'
+
+    if args.make_bg:
+        return make_median_background(name, args.config, cam_cfg)
+
     view = TrackerView(name, args.config, use_gui=not args.no_gui)
 
     csv_file = None

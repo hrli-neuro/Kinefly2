@@ -80,6 +80,25 @@ Options: `--video FILE` (override the video in the config), `--pace` (play at
 the video's frame rate), `--csv out.csv` (write per-frame angles),
 `--no-gui`.
 
+**Backgrounds.** For faint wing blur on a bright backlight, background
+subtraction is essential. Two ways to get a background:
+- On the rig: click `saveBG` before the fly is mounted (or with the fly not
+  illuminated).
+- From an existing video: `--make-bg` computes the temporal median of the
+  whole video (moving wings/legs vanish, the static body/tether stay) and
+  saves it as this camera's background, then exits:
+  ```bash
+  python -m kinefly2.apps.run_offline config/camera_bottom.yaml --make-bg
+  ```
+  Then enable the `subtract` checkboxes (or set `subtract_bg: true` per part).
+
+**Independent left/right wing regions.** The `symmetric` toolbar checkbox
+controls whether edits mirror across the body axis. Checked, moving one
+wing's hinge/radius/angle handles moves the other's to match (fast initial
+setup). Unchecked, every left/right handle is fully independent — use this
+when the two wings need different scanning regions. The setting persists in
+the YAML (`gui.symmetric`).
+
 ### 2.2 Real time on the rig (both cameras)
 
 ```bash
@@ -181,6 +200,7 @@ apply). Anything missing falls back to `tracker_defaults()`.
 
 | Key | Meaning |
 |---|---|
+| `invertcolor` | `auto` (detect from the first frame), `true` (dark fly on bright IR backlight — the usual bottom view), `false` (bright fly on dark background). Set it explicitly per camera: auto-detection can guess wrong on views without a dark body at the region between the hinges (e.g. a frontal head view). The GUI toggle persists here. |
 | `scale_image` | Downscale factor applied to frames before tracking (0.5 halves resolution, ~4x faster). |
 | `n_edges_max` | Max edges reported per wing by the edge tracker (1 = leading edge only). |
 | `rc_background` | Time constant (s) of the moving-average background model. |
@@ -194,6 +214,7 @@ apply). Anything missing falls back to `tracker_defaults()`.
 | `autozero` | Auto-center the reported angle on the resting position. |
 | `threshold` | Edge-strength threshold (edge tracker); 0 = accept all. |
 | `feathering` | Softening of mask edges (0–1). |
+| `polar_amplify` | Angular resolution multiplier of the polar transform (default 1.0). Raise (2–4) to resolve small rotations (e.g. head roll of a few degrees) at the cost of ~1–3 ms/frame for that part. |
 | `saturation_correction` | Compensate saturated pixels when background-subtracting. |
 
 **Geometry, per part under `gui:`** — what the handles edit

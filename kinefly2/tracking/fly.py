@@ -209,9 +209,9 @@ class Fly(object):
         if (image is not None):
             self.header = header
             
-            #if (not self.bInvertColorValid) and (self.bInvertColorAuto):
-                #self.bInvertColor = self.get_invertcolor(image)
-                #self.bInvertColorValid = True
+            if (not self.bInvertColorValid) and (self.bInvertColorAuto):
+                self.bInvertColor = self.get_invertcolor(image)
+                self.bInvertColorValid = True
 
             
             # Get the dt from the header timestamps (seconds).  The background-model

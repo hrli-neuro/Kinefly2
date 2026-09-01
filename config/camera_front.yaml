@@ -1,15 +1,105 @@
-# Front-view camera: wing-envelope roll + head roll.
-# In this view the "left"/"right" edge trackers measure the wing envelope's
-# roll edges and the "head" area tracker measures head roll.
 name: front
 camera:
-  # For the rig (FLIR/Spinnaker):
-  #   kind: pyspin
-  #   serial: "87654321"
-  #   fps: 90
-  #   exposure_us: 2000
-  #   gain_db: 10
   kind: video
-  path: ../tests/videos/synthetic_bottom.avi   # Placeholder until a front-view recording exists.
+  path: /Users/haoruli/Desktop/260819_XHCS_XHCS_017_YAMV_cam2.mp4
   pace: false
   loop: false
+tracker:
+  invertcolor: false   # Bright head on dark background; auto-detection guesses wrong on this view.
+  scale_image: 1.0
+  n_edges_max: 1
+  rc_background: 1000.0
+  wingbeat_min: 180
+  wingbeat_max: 220
+  head:
+    tracker: area
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    polar_amplify: 2.0   # Finer polar resolution for small head-roll angles (costs ~1 ms/frame).
+    saturation_correction: true
+  abdomen:
+    tracker: tip
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: true
+  left:
+    tracker: edge
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: true
+  right:
+    tracker: edge
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: true
+  aux:
+    tracker: intensity
+    saturation_correction: true
+  gui:
+    windows: false
+    symmetric: false   # Left/right wing regions adjust independently in the GUI.
+    axis:
+      track: false
+      pt1:
+        x: 175.0
+        y: 50.0
+      pt2:
+        x: 175.0
+        y: 150.0
+    head:
+      track: true
+      subtract_bg: false
+      stabilize: false
+      hinge:
+        x: 130.0
+        y: 179.0
+      radius_outer: 127.01574705523721
+      radius_inner: 1.0
+      angle_hi: 0.43897254497110083
+      angle_lo: -0.43897254497110083
+    abdomen:
+      track: false
+      subtract_bg: false
+      stabilize: false
+      hinge:
+        x: 80.0
+        y: 182.0
+      radius_outer: 10.0
+      radius_inner: 5.0
+      angle_hi: 3.927
+      angle_lo: 2.3562
+    left:
+      track: false
+      subtract_bg: false
+      stabilize: false
+      hinge:
+        x: 73.55654736782802
+        y: 157.34164758519393
+      radius_outer: 20.0
+      radius_inner: 10.0
+      angle_hi: -0.7854
+      angle_lo: -2.3562
+    right:
+      track: false
+      subtract_bg: false
+      stabilize: false
+      hinge:
+        x: 76.55116190422538
+        y: 207.25188985848268
+      radius_outer: 20.0
+      radius_inner: 10.0
+      angle_hi: 2.3562
+      angle_lo: 0.7854
+    aux:
+      track: false
+      subtract_bg: false
+      center:
+        x: 50.0
+        y: 50.0
+      radius1: 30.0
+      radius2: 20.0
+      angle: 0.0

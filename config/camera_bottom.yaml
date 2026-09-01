@@ -1,22 +1,104 @@
-# Bottom-view camera: L/R wing stroke amplitude + head yaw.
-#
-# Head-yaw tip: if the antennae are visible from below, set the head tracker
-# to 'edge' (tracker: edge under tracker: head:) and place a narrow annulus
-# (radius_inner/radius_outer just bracketing the antennae) so the antenna edge
-# is tracked like a wing leading edge -- often cleaner than whole-head 'area'
-# registration. Both are available per camera; compare on real video.
 name: bottom
 camera:
-  # For the rig (FLIR/Spinnaker):
-  #   kind: pyspin
-  #   serial: "12345678"
-  #   fps: 90
-  #   exposure_us: 2000
-  #   gain_db: 10
-  # For development, play a recorded video:
   kind: video
-  path: ../tests/videos/synthetic_bottom.avi
+  path: /Users/haoruli/Desktop/260819_XHCS_XHCS_017_YAMV_cam1.mp4
   pace: false
   loop: false
-# tracker: section is created/updated by the GUI (hinges, radii, angles,
-# thresholds). Delete it to start over from defaults.
+tracker:
+  invertcolor: true    # Dark fly on bright IR backlight (verified on 260819 videos).
+  scale_image: 1.0
+  n_edges_max: 1
+  rc_background: 1000.0
+  wingbeat_min: 180
+  wingbeat_max: 220
+  head:
+    tracker: area
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: true
+  abdomen:
+    tracker: tip
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: true
+  left:
+    tracker: edge
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: true
+  right:
+    tracker: edge
+    autozero: true
+    threshold: 0.0
+    feathering: 0.25
+    saturation_correction: true
+  aux:
+    tracker: intensity
+    saturation_correction: true
+  gui:
+    windows: false
+    symmetric: false   # Left/right wing regions adjust independently in the GUI.
+    axis:
+      track: false
+      pt1:
+        x: 175.0
+        y: 50.0
+      pt2:
+        x: 175.0
+        y: 150.0
+    head:
+      track: true
+      subtract_bg: false
+      stabilize: false
+      hinge:
+        x: 278.0
+        y: 164.0
+      radius_outer: 29.546573405388315
+      radius_inner: 14.560219778561036
+      angle_hi: 1.0868771956632024
+      angle_lo: -1.0868771956632024
+    abdomen:
+      track: false
+      subtract_bg: false
+      stabilize: false
+      hinge:
+        x: 202.0
+        y: 159.0
+      radius_outer: 10.0
+      radius_inner: 5.0
+      angle_hi: 3.927
+      angle_lo: 2.3562
+    left:
+      track: true
+      subtract_bg: true   # config/background_bottom.png (median of the video) makes the faint wing blur stand out.
+      stabilize: false
+      hinge:
+        x: 237.0
+        y: 139.0
+      radius_outer: 101.84301645179212
+      radius_inner: 72.55714687158297
+      angle_hi: -0.14032230725997774
+      angle_lo: -1.2961091897054542
+    right:
+      track: true
+      subtract_bg: true
+      stabilize: false
+      hinge:
+        x: 234.07808998448542
+        y: 183.4130322358214
+      radius_outer: 101.84301645179212
+      radius_inner: 72.55714687158297
+      angle_hi: 1.2961091897054542
+      angle_lo: 0.14032230725997774
+    aux:
+      track: false
+      subtract_bg: false
+      center:
+        x: 50.0
+        y: 50.0
+      radius1: 30.0
+      radius2: 20.0
+      angle: 0.0

@@ -27,7 +27,8 @@ from ..tracking.MsgFlyState import Header
 
 
 def tracker_defaults():
-    return {'scale_image': 1.0,      # Reducing the image scale will speed the framerate.
+    return {'invertcolor': 'auto',   # 'auto', true (dark fly on bright bg), or false.
+            'scale_image': 1.0,      # Reducing the image scale will speed the framerate.
             'n_edges_max': 1,        # Max number of edges per wing to detect, subject to threshold.
             'rc_background': 1000.0, # Time constant (s) of the moving average background.
             'wingbeat_min': 180,     # Bounds for wingbeat frequency measurement.
@@ -122,6 +123,18 @@ class TrackerView:
         self.bValidImage = False
         self.fly = Fly(self.scale_params(self.params, self.scale))
         self.fly.set_params(self.scale_params(self.params, self.scale))
+
+        # invertcolor: 'auto' detects from the first frame (dark fly on bright
+        # backlight vs bright fly on dark background); an explicit true/false
+        # from the YAML (or the GUI toggle, which persists) overrides it.
+        inv = self.params.get('invertcolor', 'auto')
+        if inv in ('auto', None):
+            self.fly.bInvertColorAuto = True
+            self.fly.bInvertColorValid = False
+        else:
+            self.fly.bInvertColor = bool(inv)
+            self.fly.bInvertColorValid = True
+            self.fly.bInvertColorAuto = False
 
         # Background image for subtraction, stored next to the config file.
         cfg_dir = os.path.dirname(os.path.abspath(self.config_path))
@@ -648,6 +661,7 @@ class TrackerView:
                     self.fly.bInvertColor = state
                     self.fly.bInvertColorValid = True
                     self.fly.bInvertColorAuto = False
+                    self.params['invertcolor'] = bool(state)
                 elif name == 'stabilize':
                     for partname in ('head', 'abdomen', 'left', 'right'):
                         self.params['gui'][partname]['stabilize'] = state
