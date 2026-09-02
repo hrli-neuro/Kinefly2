@@ -1,0 +1,17 @@
+# Per-experiment settings: everything that changes between recordings.
+# Copy this file per project/day, or override fields on the command line:
+#   python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --fly 018
+# Rig-level settings (cameras, ports) stay in config/rig.yaml; tracking
+# regions stay in the camera YAMLs.
+
+data_root: ~/Data/Kinefly2     # recordings go under <data_root>/<date>/<name>/
+date: auto                     # YYMMDD; 'auto' = today
+genotype: XHCS_XHCS
+fly_id: "017"
+protocol: YAMV                 # stimulus / open-loop / closed-loop protocol name
+notes: ""
+
+record_video: true             # save raw MJPEG video per camera (~2-4 GB/hour/camera)
+video_quality: 95              # JPEG quality 1-100
+log_flystate: true             # HDF5 fly-state log
+events_port: 5557              # ZMQ PULL socket for stimulus-program events; null = off

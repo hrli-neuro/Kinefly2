@@ -10,11 +10,12 @@ import traceback
 
 
 class CameraPipeline:
-    def __init__(self, view, source, merger=None, render=True):
+    def __init__(self, view, source, merger=None, render=True, recorder=None):
         self.view = view
         self.source = source
         self.merger = merger
         self.render = render
+        self.recorder = recorder      # Optional VideoRecorder: gets every captured frame.
         self.thread = threading.Thread(target=self._run, daemon=True,
                                        name='pipeline-%s' % view.name)
         self.running = False
@@ -43,6 +44,8 @@ class CameraPipeline:
                 if frame is None:
                     self.eof = True
                     return
+                if self.recorder is not None:
+                    self.recorder.write(frame)
                 state = self.view.process(frame)
                 self.n_frames += 1
                 if state is not None and self.merger is not None:

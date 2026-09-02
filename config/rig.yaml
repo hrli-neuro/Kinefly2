@@ -1,8 +1,12 @@
 # Rig-level configuration for run_rig.py.
 # Camera YAML paths are relative to this file.
+# Each camera is an independent system. Entries are a path, or {config: path,
+# enabled: false} to leave a camera off; `run_rig --cameras bottom` overrides.
 cameras:
   bottom: camera_bottom.yaml   # Bottom view: L/R wing stroke amplitude + head yaw.
-  front: camera_front.yaml     # Front view: wing-envelope roll + head roll.
+  front:                       # Front view: wing-envelope roll + head roll.
+    config: camera_front.yaml
+    enabled: true
 primary: bottom                # This camera's updates drive the merged output.
 use_gui: true
 zmq_port: 5556                 # Merged fly state published as JSON on tcp://*:5556.

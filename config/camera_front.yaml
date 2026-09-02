@@ -1,5 +1,14 @@
 name: front
 camera:
+  # Rig (FLIR/Spinnaker) example -- exposure guidance: at 90 fps use an exposure
+  # near the frame period (~9000 us) so each frame contains the blurred stroke
+  # ENVELOPE (its leading edge = stroke amplitude, what the edge tracker reads).
+  # A short exposure (~1000 us) freezes the wing at a random stroke phase instead.
+  #   kind: pyspin
+  #   serial: "12345678"
+  #   fps: 90
+  #   exposure_us: 9000
+  #   gain_db: 10
   kind: video
   path: /Users/haoruli/Desktop/260819_XHCS_XHCS_017_YAMV_cam2.mp4
   pace: false

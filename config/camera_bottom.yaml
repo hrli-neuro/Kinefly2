@@ -1,11 +1,20 @@
 name: bottom
 camera:
+  # Rig (FLIR/Spinnaker) example -- exposure guidance: at 90 fps use an exposure
+  # near the frame period (~9000 us) so each frame contains the blurred stroke
+  # ENVELOPE (its leading edge = stroke amplitude, what the edge tracker reads).
+  # A short exposure (~1000 us) freezes the wing at a random stroke phase instead.
+  #   kind: pyspin
+  #   serial: "12345678"
+  #   fps: 90
+  #   exposure_us: 9000
+  #   gain_db: 10
   kind: video
   path: /Users/haoruli/Desktop/260819_XHCS_XHCS_017_YAMV_cam1.mp4
   pace: false
   loop: false
 tracker:
-  invertcolor: true    # Dark fly on bright IR backlight (verified on 260819 videos).
+  invertcolor: true
   scale_image: 1.0
   n_edges_max: 1
   rc_background: 1000.0
@@ -40,7 +49,7 @@ tracker:
     saturation_correction: true
   gui:
     windows: false
-    symmetric: false   # Left/right wing regions adjust independently in the GUI.
+    symmetric: false
     axis:
       track: false
       pt1:
@@ -73,26 +82,26 @@ tracker:
       angle_lo: 2.3562
     left:
       track: true
-      subtract_bg: true   # config/background_bottom.png (median of the video) makes the faint wing blur stand out.
+      subtract_bg: true
       stabilize: false
       hinge:
         x: 237.0
         y: 139.0
-      radius_outer: 101.84301645179212
+      radius_outer: 100.16985574512923
       radius_inner: 72.55714687158297
       angle_hi: -0.14032230725997774
-      angle_lo: -1.2961091897054542
+      angle_lo: -1.384248670457543
     right:
       track: true
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 234.07808998448542
-        y: 183.4130322358214
-      radius_outer: 101.84301645179212
+        x: 235.0
+        y: 185.0
+      radius_outer: 120.56948204251356
       radius_inner: 72.55714687158297
-      angle_hi: 1.2961091897054542
-      angle_lo: 0.14032230725997774
+      angle_hi: 0.9746390216541299
+      angle_lo: 0.04496241962143088
     aux:
       track: false
       subtract_bg: false
