@@ -19,6 +19,7 @@ import numpy as np
 import yaml
 
 from ..core.flystate import CameraState
+from . import autoplace
 from ..tracking import ui
 from ..tracking import imageprocessing
 from ..tracking.fly import Fly
@@ -139,6 +140,8 @@ class TrackerView:
         # Background image for subtraction, stored next to the config file.
         cfg_dir = os.path.dirname(os.path.abspath(self.config_path))
         self.filenameBackground = os.path.join(cfg_dir, 'background_%s.png' % name)
+        self.filenameReference = os.path.join(cfg_dir, 'reference_%s.png' % name)
+        self.statusText = ''
         imgDisk = cv2.imread(self.filenameBackground, cv2.IMREAD_GRAYSCALE)
         if imgDisk is not None:
             if self.scale != 1.0:
@@ -215,10 +218,13 @@ class TrackerView:
                 paramsScaled['gui'][partname][tag]['y'] = paramsIn['gui'][partname][tag]['y'] * scale
         return paramsScaled
 
-    def save_params(self):
+    def save_params(self, save_reference=True):
         self.config['tracker'] = self.params
         with open(self.config_path, 'w') as f:
             yaml.safe_dump(self.config, f, sort_keys=False)
+        # The frame the regions were tuned on becomes the autoplace reference.
+        if save_reference and self.imgUnscaled is not None:
+            cv2.imwrite(self.filenameReference, self.imgUnscaled)
 
     # ---------------------------------------------------------------- tracking
 
@@ -278,6 +284,9 @@ class TrackerView:
                 s = '%5.1fHz  track:%4.1fms' % (self.hzF, self.dtTrack * 1e3)
                 cv2.putText(imgOutput, s, (x, y), self.fontface, self.scaleText,
                             ui.bgra_dict['dark_red'])
+                if self.statusText:
+                    cv2.putText(imgOutput, self.statusText, (x + int(180 * self.scale), y),
+                                self.fontface, self.scaleText, ui.bgra_dict['dark_green'])
 
                 if self.params['gui']['aux']['track']:
                     y -= h_text + self.h_gap
@@ -341,6 +350,7 @@ class TrackerView:
 
         add(type='pushbutton', name='exit', text='exit')
         add(type='pushbutton', name='save_bg', text='saveBG')
+        add(type='pushbutton', name='autoplace', text='autoplace')
         add(type='static', name='track', text='track:',
             sides=ui.SIDE_LEFT | ui.SIDE_TOP | ui.SIDE_BOTTOM)
         for partname, label in (('head', 'H'), ('abdomen', 'A'), ('left', 'L'),
@@ -383,6 +393,37 @@ class TrackerView:
         cv2.imwrite(self.filenameBackground, self.imgUnscaled)
         self.fly.set_background(self.imgScaled)
         self.bHaveBackground = True
+
+    def autoplace(self):
+        """Place the tracking regions from the current image: register to the
+        saved reference frame if one exists, else bootstrap from the silhouette."""
+        if self.imgUnscaled is None:
+            return
+        ref = cv2.imread(self.filenameReference, cv2.IMREAD_GRAYSCALE)
+        try:
+            if ref is not None and ref.shape == self.imgUnscaled.shape:
+                mask = autoplace.body_mask(self.params, ref.shape)
+                W, method = autoplace.register(ref, self.imgUnscaled, mask)
+                self.params, rot = autoplace.transform_params(self.params, W)
+                self.statusText = 'autoplace: %s  shift (%.1f, %.1f) px  rot %.1f deg' % (
+                    method, W[0, 2], W[1, 2], np.degrees(rot))
+            else:
+                inv = self.fly.bInvertColor
+                self.params, info = autoplace.silhouette_bootstrap(self.imgUnscaled, self.params, inv)
+                self.statusText = 'autoplace: silhouette (no reference yet) - refine, then save'
+        except Exception as e:
+            self.statusText = 'autoplace failed: %s' % e
+            print('%s: %s' % (self.name, self.statusText))
+            return
+        print('%s: %s' % (self.name, self.statusText))
+        self.params = self.legalize_params(self.params)
+        for part in (self.fly.axis, self.fly.head, self.fly.abdomen,
+                     self.fly.left, self.fly.right, self.fly.aux):
+            part.bValidMask = False
+        self.fly.set_params(self.scale_params(self.params, self.scale))
+        self.fly.create_masks(self.shapeImage)
+        self.fly.update_handle_points()
+        self.save_params(save_reference=False)
 
     def hit_object(self, ptMouse):
         tagHit = None
@@ -623,6 +664,8 @@ class TrackerView:
                     self.save_background()
                 elif self.nameSelected == self.nameSelectedNow == 'exit':
                     self.bQuit = True
+                elif self.nameSelected == self.nameSelectedNow == 'autoplace':
+                    self.autoplace()
 
             elif self.uiSelected == 'checkbox':
                 if self.nameSelected == self.nameSelectedNow:

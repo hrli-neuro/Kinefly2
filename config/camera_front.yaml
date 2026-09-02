@@ -21,11 +21,11 @@ tracker:
   wingbeat_min: 180
   wingbeat_max: 220
   head:
-    tracker: area
+    tracker: rotation    # Template rotation search: resolves small head-roll angles (~1 ms/frame).
+    search_deg: 8        # Half-range of the rotation search (deg).
     autozero: true
     threshold: 0.0
     feathering: 0.25
-    polar_amplify: 2.0   # Finer polar resolution for small head-roll angles (costs ~1 ms/frame).
     saturation_correction: true
   abdomen:
     tracker: tip
@@ -66,10 +66,10 @@ tracker:
       hinge:
         x: 130.0
         y: 179.0
-      radius_outer: 127.01574705523721
-      radius_inner: 1.0
-      angle_hi: 0.43897254497110083
-      angle_lo: -0.43897254497110083
+      radius_outer: 70.0    # Annulus over the head texture (not the whole ball): r 30-70 px, +-50 deg
+      radius_inner: 30.0    # gave r=0.96 vs an independent roll estimate on the 260819 video.
+      angle_hi: 0.8727
+      angle_lo: -0.8727
     abdomen:
       track: false
       subtract_bg: false

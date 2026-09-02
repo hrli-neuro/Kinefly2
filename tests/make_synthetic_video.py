@@ -28,6 +28,7 @@ LEFT_HINGE = (156.0, 176.0)
 RIGHT_HINGE = (196.0, 176.0)
 WING_R = 75.0
 HEAD_R = 26.0
+HEAD_AMP_DEG = 15.0        # head rotation amplitude (tests override for small angles)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -62,7 +63,7 @@ def draw_frame(t):
     # entire annulus content moves with the head angle.
     # The head must be smaller than its tracking wedge (as in real use), so the
     # rotating silhouette boundary is the registration feature.
-    aH = -90.0 + 15.0 * math.sin(2 * math.pi * 0.7 * t)      # head direction, deg
+    aH = -90.0 + HEAD_AMP_DEG * math.sin(2 * math.pi * 0.7 * t)   # head direction, deg
     cx, cy = HEAD_HINGE
     hx = cx + 13.0 * math.cos(math.radians(aH))
     hy = cy + 13.0 * math.sin(math.radians(aH))

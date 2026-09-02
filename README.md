@@ -123,7 +123,66 @@ while True:
     lmr = parts['left']['angles'][0] - parts['right']['angles'][0]  # L-R WSA (rad)
 ```
 
-### 2.3 Timing validation
+### 2.3 Per-experiment recordings (open- or closed-loop)
+
+Everything that changes between recordings lives in one experiment YAML
+(`experiments/default.yaml`: data root, genotype, fly id, protocol, notes,
+video on/off, event port) with command-line overrides for quick successive
+flies:
+
+```bash
+python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --fly 018
+python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --fly 019 --protocol OL_stripe --no-video
+python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --cameras bottom   # front camera off
+```
+
+Each recording gets a folder named with the lab convention
+`{date}_{genotype}_{fly_id}_{protocol}` (suffix `_2`, `_3`… if it exists):
+
+```
+<data_root>/<date>/260819_XHCS_XHCS_017_YAMV/
+  260819_XHCS_XHCS_017_YAMV_flystate.h5       angles + timestamps (+ /events)
+  260819_XHCS_XHCS_017_YAMV_bottom.avi        raw MJPEG video (record_video: true)
+  260819_XHCS_XHCS_017_YAMV_bottom_frames.csv frame_id/t_camera/t_host per video frame
+  260819_XHCS_XHCS_017_YAMV_front.avi / _front_frames.csv
+  260819_XHCS_XHCS_017_YAMV_events.jsonl      stimulus events as received
+  260819_XHCS_XHCS_017_YAMV_experiment.yaml   resolved settings after overrides
+  configs/                                    snapshot of rig.yaml + camera YAMLs used
+```
+
+The raw video makes every recording re-analyzable with different regions or
+trackers: `run_offline <folder>/configs/camera_bottom.yaml --video <folder>/<name>_bottom.avi --csv out.csv`.
+Video frame *k* corresponds to the sidecar row *k*, whose `frame_id` equals
+`/<camera>/seq` in the HDF5.
+
+**Stimulus events on the same clock.** Your arena/stimulus program can push
+any string (JSON recommended) to the recording; it is stamped on arrival with
+the fly-state clock (`t_host`) and wall-clock time (`t_wall`) and written to
+`/events` in the HDF5 and to the `.jsonl`:
+
+```python
+import zmq
+sock = zmq.Context().socket(zmq.PUSH)
+sock.connect('tcp://localhost:5557')             # events_port; rig IP from another machine
+sock.send_string('{"trial": 12, "event": "closed_loop_start", "gain": 1.5}')
+```
+
+Without `--exp` (or any experiment flag) `run_rig` behaves as before: an
+auto-named `flystate_<timestamp>.h5` in `rig.yaml`'s `log_dir`, no video.
+
+### 2.4 Live browser dashboard
+
+```bash
+python -m kinefly2.apps.dashboard                       # tracker on this machine
+python -m kinefly2.apps.dashboard --zmq tcp://<rig-ip>:5556 --port 8000
+```
+
+Open `http://<machine>:8000` from any computer on the network for live
+traces of L, R, L−R, head yaw/roll and wingbeat frequency. It is a separate
+process reading the ZMQ stream, so it adds no load to the tracker, and the
+page has no external dependencies (works on an offline rig network).
+
+### 2.5 Timing validation
 
 ```bash
 python -m kinefly2.apps.check_latency config/camera_bottom.yaml --seconds 30
@@ -132,7 +191,7 @@ python -m kinefly2.apps.check_latency config/camera_bottom.yaml --seconds 30
 Healthy rig numbers at 90 Hz: interval median ≈ 11.1 ms, dropped frames = 0,
 track median in the low milliseconds.
 
-### 2.4 GUI controls (same UX as Kinefly)
+### 2.6 GUI controls (same UX as Kinefly)
 
 - **Handles (drag with mouse):** head/abdomen hinge points define the body
   axis; wing hinge points sit on the wing bases; for each part, the two line
@@ -141,11 +200,24 @@ track median in the low milliseconds.
   two radius handles.
 - **Toolbar:** `exit`; `saveBG` (capture the current image as the background
   for subtraction — do it with the fly absent or not illuminated);
+  `autoplace` (place all regions automatically from the current image, see
+  below);
   `track: H A L R X` (toggle head/abdomen/left/right/aux);
   `subtract: H A LR X` (background subtraction per part); `invertcolor`
   (set if the fly is dark on a bright background); `stabilize`; `symmetric`
   (mirror left/right edits); `windows` (extra debug windows).
-- **Every mouse-up saves the parameters back into that camera's YAML.**
+- **Every mouse-up saves the parameters back into that camera's YAML** and
+  stores the current frame as `config/reference_<camera>.png`, the frame the
+  regions were tuned on.
+
+**Auto-placement (`autoplace`).** For a new fly, click `autoplace`: the
+current frame is registered to the saved reference frame (rotation +
+translation, ECC) and every hinge/center moves accordingly, so a fly mounted
+a few pixels or degrees off needs at most a nudge. The status line reports
+the shift/rotation found. If no reference exists yet, a rough silhouette
+bootstrap (bottom view) places the body axis and hinges from the fly's
+outline — refine once, save, and the registration method takes over from
+then on. Each camera has its own reference.
 
 ---
 
@@ -156,9 +228,11 @@ track median in the low milliseconds.
 | `config/rig.yaml` | Rig topology: camera list, primary camera, ZMQ port, log dir. |
 | `config/camera_bottom.yaml` | Bottom view: `camera:` (capture settings) + `tracker:` (all tracking params, GUI-managed). |
 | `config/camera_front.yaml` | Same, for the front view. |
-| `config/background_<name>.png` | Per-camera background image, written by `saveBG`. |
+| `config/background_<name>.png` | Per-camera background image, written by `saveBG` or `--make-bg`. |
+| `config/reference_<name>.png` | Per-camera reference frame for `autoplace` (saved with the params). |
+| `experiments/*.yaml` | Per-recording settings: data root, genotype/fly/protocol, notes, video on/off, event port (section 2.3). |
 | `kinefly2/gui/app.py` → `tracker_defaults()` | Defaults used for any tracker parameter missing from a camera YAML. |
-| `logs/flystate_*.h5` | Per-experiment data (see layout in `kinefly2/output/logger.py`). |
+| `<data_root>/<date>/<name>/` | Recording folder (HDF5, videos, events, resolved settings, config snapshot). `logs/flystate_*.h5` only without `--exp`. |
 | `tests/videos/*` | Auto-generated synthetic test fixtures — regenerated by the tests, don't tune configs here. |
 
 ### 3.1 `config/rig.yaml`
@@ -166,7 +240,9 @@ track median in the low milliseconds.
 ```yaml
 cameras:                      # name -> per-camera YAML (paths relative to this file)
   bottom: camera_bottom.yaml
-  front: camera_front.yaml
+  front:                      # or {config, enabled} to keep a camera off
+    config: camera_front.yaml
+    enabled: true
 primary: bottom               # this camera's updates drive the merged output
 use_gui: true
 zmq_port: 5556                # remove/comment to disable the publisher
@@ -210,10 +286,11 @@ apply). Anything missing falls back to `tracker_defaults()`.
 
 | Key | Meaning |
 |---|---|
-| `tracker` | Algorithm: `edge` (radial edge angle — wings, or antennae for head yaw), `area` (rotation via polar image registration — head), `tip` (farthest point — abdomen), `intensity` (mean intensity + wingbeat frequency — aux). |
+| `tracker` | Algorithm: `edge` (radial edge angle — wings, or antennae for head yaw), `area` (rotation via polar image registration — head), `rotation` (rotation via template rotation search about the hinge — small angles such as head roll from the front; ~1 ms/frame), `tip` (farthest point — abdomen), `intensity` (mean intensity + wingbeat frequency — aux). |
 | `autozero` | Auto-center the reported angle on the resting position. |
 | `threshold` | Edge-strength threshold (edge tracker); 0 = accept all. |
 | `feathering` | Softening of mask edges (0–1). |
+| `search_deg` | `rotation` tracker only: half-range of the rotation search in degrees (default 8). |
 | `polar_amplify` | Angular resolution multiplier of the polar transform (default 1.0). Raise (2–4) to resolve small rotations (e.g. head roll of a few degrees) at the cost of ~1–3 ms/frame for that part. |
 | `saturation_correction` | Compensate saturated pixels when background-subtracting. |
 
@@ -233,11 +310,12 @@ apply). Anything missing falls back to `tracker_defaults()`.
 
 ### 3.4 Data file layout (`logs/*.h5`)
 
-One row per merged state: `/merged/seq`, `/merged/t_host`, and per camera
+One row per merged state: `/merged/seq`, `/merged/t_host`, `/merged/t_wall`, and per camera
 `/<cam>/seq`, `t_camera`, `t_host`, `t_done`, `/<cam>/<part>_angle` and
 `_radius` for head/abdomen/left/right, `/<cam>/aux_intensity`, `aux_freq`.
 Angles are radians; times are seconds (host clock is monotonic; `t_camera` is
-the device clock). Readable with h5py or MATLAB's `h5read`.
+the device clock; `t_wall` is `time.time()`). Events: `/events/t_host`, `/events/t_wall`,
+`/events/text`. Readable with h5py or MATLAB's `h5read`.
 
 ---
 
@@ -247,8 +325,9 @@ the device clock). Readable with h5py or MATLAB's `h5read`.
   serials; other GenICam/USB vendors → use `kind: opencv`, or add a new
   `FrameSource` subclass in `kinefly2/camera/` (implement `open/read/close`
   returning `Frame` objects) and register it in `camera/base.py::make_source`.
-- **One camera instead of two:** delete the second entry under `cameras:` in
-  `rig.yaml` (or just run `run_offline` for a single camera).
+- **One camera instead of two:** set `enabled: false` on the camera in
+  `rig.yaml`, or run `run_rig ... --cameras bottom`; each camera is an
+  independent system with its own config, background and reference files.
 - **Different views / body parts:** each camera YAML is independent — e.g. use
   the front camera's `left`/`right` edge trackers for wing-envelope roll edges
   and its `head` area tracker for head roll. Head yaw from below can use
@@ -279,8 +358,10 @@ kinefly2/camera/     FrameSource abstraction: pyspin_source, video_source, openc
 kinefly2/core/       CameraPipeline (per-camera thread), StateMerger, flystate dataclasses
 kinefly2/output/     FlystateSink interface, ZMQ publisher, HDF5 logger; future panels driver
 kinefly2/gui/        TrackerView: per-camera window, toolbar, draggable handles, YAML save
-kinefly2/apps/       run_offline, run_rig, check_latency
-config/              rig.yaml + per-camera YAMLs + saved backgrounds
+kinefly2/apps/       run_offline, run_rig, check_latency, dashboard
+kinefly2/gui/autoplace.py  automatic region placement (registration / silhouette)
+config/              rig.yaml + per-camera YAMLs + saved backgrounds/references
+experiments/         per-recording settings templates
 tests/               synthetic-video generator + ground-truth and architecture tests
 ```
 
@@ -289,6 +370,10 @@ tests/               synthetic-video generator + ground-truth and architecture t
 - [x] Python 3 port of the tracking core, verified against synthetic ground
       truth (wings r=1.000, head r=0.989).
 - [x] Dual-camera threaded pipeline, merged state, ZMQ publisher, HDF5 logger.
+- [x] Per-experiment recordings (naming convention, raw MJPEG video, stimulus
+      events on a shared clock, config snapshots), browser dashboard.
+- [x] Auto-placement of regions (`autoplace`), `rotation` tracker for small
+      head-roll angles.
 - [ ] Live PySpin validation at 90 Hz on the rig (pending the Linux machine
       and FLIR cameras).
 - [ ] Reiser LED-panel closed-loop sink (pending the arena). Verify the
