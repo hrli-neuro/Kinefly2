@@ -82,7 +82,68 @@ def test_silhouette_bootstrap():
         print('bootstrap %s: %.0f%% of body length from truth' % (part, 100 * err))
 
 
+
+def test_safety_and_reset():
+    """The GUI-level flow: autoplace applies only plausible, in-image results;
+    reset undoes it and then restores the startup layout."""
+    ensure_synthetic()
+    import shutil
+    import tempfile
+    import time
+    import yaml
+    from kinefly2.camera.base import Frame
+    from kinefly2.gui import autoplace
+    from kinefly2.gui.app import TrackerView
+
+    # Work on a copy of the synthetic config so the fixture stays clean.
+    d = tempfile.mkdtemp()
+    cfg = os.path.join(d, 'cam.yaml')
+    shutil.copy(VID_CFG, cfg)
+    view = TrackerView('cam', cfg, use_gui=False)
+    ref = load_frame(0)
+    view.process(Frame(image=ref, t_camera=0.0, t_host=time.monotonic(), frame_id=0))
+    assert os.path.exists(view.filenameReference), 'first frame should become the reference'
+    startup = yaml.safe_load(open(cfg))['tracker']['gui']['head']['hinge']
+
+    # Plausible shift: applied, hinges follow.
+    M = np.float32([[1, 0, 10], [0, 1, -6]])
+    cur = cv2.warpAffine(ref, M, (ref.shape[1], ref.shape[0]))
+    view.process(Frame(image=cur, t_camera=0.1, t_host=time.monotonic(), frame_id=1))
+    view.autoplace()
+    h = view.params['gui']['head']['hinge']
+    assert abs(h['x'] - (startup['x'] + 10)) < 2 and abs(h['y'] - (startup['y'] - 6)) < 2, h
+    assert os.path.exists(cfg + '.bak')
+    assert autoplace.points_inside(view.params, ref.shape)
+
+    # Reset once: undo the autoplace.
+    view.reset_params()
+    h = view.params['gui']['head']['hinge']
+    assert abs(h['x'] - startup['x']) < 1e-6 and abs(h['y'] - startup['y']) < 1e-6
+
+    # Implausible transform (huge shift): rejected, params unchanged.
+    W = np.float32([[1, 0, 200], [0, 1, 0]])
+    assert not autoplace.plausible_transform(W, ref.shape)
+    moved, _ = autoplace.transform_params(view.params, W)
+    assert not autoplace.points_inside(moved, ref.shape)
+    clamped = autoplace.clamp_to_image(moved, ref.shape)
+    assert autoplace.points_inside(clamped, ref.shape)
+
+    # A frame shifted far out of range must leave the regions untouched.
+    far = cv2.warpAffine(ref, W, (ref.shape[1], ref.shape[0]))
+    before = yaml.safe_dump(view.params)
+    view.process(Frame(image=far, t_camera=0.2, t_host=time.monotonic(), frame_id=2))
+    view.autoplace()
+    assert yaml.safe_dump(view.params) == before, view.statusText
+    assert 'unchanged' in view.statusText
+
+    # Reset with nothing to undo: startup layout.
+    view.params['gui']['head']['hinge']['x'] += 5
+    view.reset_params()
+    assert abs(view.params['gui']['head']['hinge']['x'] - startup['x']) < 1e-6
+    print('safety/reset OK')
+
 if __name__ == '__main__':
     test_register_known_transform()
     test_silhouette_bootstrap()
+    test_safety_and_reset()
     print('OK')

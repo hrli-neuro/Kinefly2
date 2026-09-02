@@ -201,7 +201,7 @@ track median in the low milliseconds.
 - **Toolbar:** `exit`; `saveBG` (capture the current image as the background
   for subtraction — do it with the fly absent or not illuminated);
   `autoplace` (place all regions automatically from the current image, see
-  below);
+  below); `reset` (undo autoplace / restore the startup layout);
   `track: H A L R X` (toggle head/abdomen/left/right/aux);
   `subtract: H A LR X` (background subtraction per part); `invertcolor`
   (set if the fly is dark on a bright background); `stabilize`; `symmetric`
@@ -210,14 +210,19 @@ track median in the low milliseconds.
   stores the current frame as `config/reference_<camera>.png`, the frame the
   regions were tuned on.
 
-**Auto-placement (`autoplace`).** For a new fly, click `autoplace`: the
-current frame is registered to the saved reference frame (rotation +
-translation, ECC) and every hinge/center moves accordingly, so a fly mounted
-a few pixels or degrees off needs at most a nudge. The status line reports
-the shift/rotation found. If no reference exists yet, a rough silhouette
-bootstrap (bottom view) places the body axis and hinges from the fly's
-outline — refine once, save, and the registration method takes over from
-then on. Each camera has its own reference.
+**Auto-placement (`autoplace`) and `reset`.** For a new fly, click
+`autoplace`: the current frame is registered to the saved reference frame
+(rotation + translation, ECC) and every hinge/center moves accordingly, so a
+fly mounted a few pixels or degrees off needs at most a nudge. The status
+line reports the shift/rotation found. Safety: the result is applied only if
+the transform is plausible (shift < 25% of the image, rotation < 30°) and
+keeps every region inside the image — otherwise nothing changes and the
+status line says why. Before applying, the camera YAML is backed up to
+`<camera>.yaml.bak`. `reset` undoes the last autoplace; pressing it again
+(or when there is nothing to undo) restores the layout loaded at startup.
+If a config already has tuned regions but no reference frame, the first
+frame of the session becomes the reference automatically. Each camera has
+its own reference.
 
 ---
 

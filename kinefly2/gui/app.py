@@ -119,6 +119,8 @@ class TrackerView:
         SetDict().set_dict_with_preserve(self.params, tracker_defaults())
         self.params = self.legalize_params(self.params)
         self.scale = self.params['scale_image']
+        self.paramsStartup = copy.deepcopy(self.params)   # 'reset' target
+        self.paramsUndo = None                             # params before the last autoplace
 
         self.bMousing = False
         self.bValidImage = False
@@ -256,6 +258,13 @@ class TrackerView:
             if self.bMousing:
                 return None
 
+            if self.iCount == 1 and self.config.get('tracker') \
+                    and not os.path.exists(self.filenameReference):
+                # Existing tuned regions but no reference yet: assume they were
+                # tuned on this view and make this frame the autoplace reference.
+                cv2.imwrite(self.filenameReference, self.imgUnscaled)
+                print('%s: saved first frame as autoplace reference %s'
+                      % (self.name, self.filenameReference))
             stamp = frame.t_camera if np.isfinite(frame.t_camera) else frame.t_host
             self.header = Header(seq=frame.frame_id, stamp=stamp, frame_id=self.name)
             t0 = time.monotonic()
@@ -351,6 +360,7 @@ class TrackerView:
         add(type='pushbutton', name='exit', text='exit')
         add(type='pushbutton', name='save_bg', text='saveBG')
         add(type='pushbutton', name='autoplace', text='autoplace')
+        add(type='pushbutton', name='reset', text='reset')
         add(type='static', name='track', text='track:',
             sides=ui.SIDE_LEFT | ui.SIDE_TOP | ui.SIDE_BOTTOM)
         for partname, label in (('head', 'H'), ('abdomen', 'A'), ('left', 'L'),
@@ -394,36 +404,74 @@ class TrackerView:
         self.fly.set_background(self.imgScaled)
         self.bHaveBackground = True
 
-    def autoplace(self):
-        """Place the tracking regions from the current image: register to the
-        saved reference frame if one exists, else bootstrap from the silhouette."""
-        if self.imgUnscaled is None:
-            return
-        ref = cv2.imread(self.filenameReference, cv2.IMREAD_GRAYSCALE)
-        try:
-            if ref is not None and ref.shape == self.imgUnscaled.shape:
-                mask = autoplace.body_mask(self.params, ref.shape)
-                W, method = autoplace.register(ref, self.imgUnscaled, mask)
-                self.params, rot = autoplace.transform_params(self.params, W)
-                self.statusText = 'autoplace: %s  shift (%.1f, %.1f) px  rot %.1f deg' % (
-                    method, W[0, 2], W[1, 2], np.degrees(rot))
-            else:
-                inv = self.fly.bInvertColor
-                self.params, info = autoplace.silhouette_bootstrap(self.imgUnscaled, self.params, inv)
-                self.statusText = 'autoplace: silhouette (no reference yet) - refine, then save'
-        except Exception as e:
-            self.statusText = 'autoplace failed: %s' % e
-            print('%s: %s' % (self.name, self.statusText))
-            return
-        print('%s: %s' % (self.name, self.statusText))
-        self.params = self.legalize_params(self.params)
+    def apply_params(self, params, status, save=True):
+        """Install a new params dict (from autoplace/reset), rebuild masks,
+        and persist it. Points are clamped into the image first so handles
+        can never end up outside the field of view."""
+        params = autoplace.clamp_to_image(params, self.imgUnscaled.shape)
+        self.params = self.legalize_params(params)
         for part in (self.fly.axis, self.fly.head, self.fly.abdomen,
                      self.fly.left, self.fly.right, self.fly.aux):
             part.bValidMask = False
         self.fly.set_params(self.scale_params(self.params, self.scale))
         self.fly.create_masks(self.shapeImage)
         self.fly.update_handle_points()
-        self.save_params(save_reference=False)
+        self.statusText = status
+        print('%s: %s' % (self.name, status))
+        if save:
+            self.save_params(save_reference=False)
+
+    def reset_params(self):
+        """Undo the last autoplace; a second press (or with nothing to undo)
+        restores the layout loaded at startup."""
+        if self.imgUnscaled is None:
+            return
+        if self.paramsUndo is not None:
+            params, self.paramsUndo = self.paramsUndo, None
+            self.apply_params(params, 'reset: undid autoplace')
+        else:
+            self.apply_params(copy.deepcopy(self.paramsStartup), 'reset: startup layout restored')
+
+    def autoplace(self):
+        """Place the tracking regions from the current image by registering
+        it to the saved reference frame. The result is applied only if the
+        transform is plausible and keeps every region inside the image;
+        otherwise nothing changes. 'reset' undoes it."""
+        if self.imgUnscaled is None:
+            return
+        ref = cv2.imread(self.filenameReference, cv2.IMREAD_GRAYSCALE)
+        if ref is None or ref.shape != self.imgUnscaled.shape:
+            self.statusText = 'autoplace: no reference frame yet - adjust any handle once to save one'
+            print('%s: %s' % (self.name, self.statusText))
+            return
+        try:
+            mask = autoplace.body_mask(self.params, ref.shape)
+            W, method = autoplace.register(ref, self.imgUnscaled, mask)
+            shift = (float(W[0, 2]), float(W[1, 2]))
+            rot = np.degrees(np.arctan2(W[1, 0], W[0, 0]))
+            if not autoplace.plausible_transform(W, ref.shape):
+                self.statusText = ('autoplace: implausible (shift %.0f,%.0f px, rot %.0f deg) - unchanged'
+                                   % (shift[0], shift[1], rot))
+                print('%s: %s' % (self.name, self.statusText))
+                return
+            moved, _ = autoplace.transform_params(self.params, W)
+            if not autoplace.points_inside(moved, ref.shape):
+                self.statusText = 'autoplace: would move regions out of the image - unchanged'
+                print('%s: %s' % (self.name, self.statusText))
+                return
+        except Exception as e:
+            self.statusText = 'autoplace failed: %s' % e
+            print('%s: %s' % (self.name, self.statusText))
+            return
+        # Keep a backup of the YAML and an in-memory undo point.
+        try:
+            import shutil
+            shutil.copy2(self.config_path, self.config_path + '.bak')
+        except OSError:
+            pass
+        self.paramsUndo = copy.deepcopy(self.params)
+        self.apply_params(moved, 'autoplace: %s  shift (%.1f, %.1f) px  rot %.1f deg  [reset = undo]'
+                          % (method, shift[0], shift[1], rot))
 
     def hit_object(self, ptMouse):
         tagHit = None
@@ -666,6 +714,8 @@ class TrackerView:
                     self.bQuit = True
                 elif self.nameSelected == self.nameSelectedNow == 'autoplace':
                     self.autoplace()
+                elif self.nameSelected == self.nameSelectedNow == 'reset':
+                    self.reset_params()
 
             elif self.uiSelected == 'checkbox':
                 if self.nameSelected == self.nameSelectedNow:

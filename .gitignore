@@ -5,3 +5,5 @@ tests/videos/*.avi
 tests/videos/*.csv
 tests/videos/*.yaml
 background_*.png
+reference_*.png
+*.yaml.bak

@@ -139,3 +139,35 @@ def silhouette_bootstrap(img, params, invertcolor=True):
     g['axis']['pt1'] = dict(g['head']['hinge'])
     g['axis']['pt2'] = dict(g['abdomen']['hinge'])
     return out, {'centroid': (cx, cy), 'angle': math.atan2(uy, ux), 'length': length, 'width': width}
+
+
+# --- safety -----------------------------------------------------------------
+
+def plausible_transform(W, shape, max_shift_frac=0.25, max_rot_deg=30.0):
+    """Reject registrations that cannot be a re-mounted fly: large shifts
+    (relative to the image size) or large rotations."""
+    h, w = shape[:2]
+    rot = abs(math.degrees(math.atan2(W[1, 0], W[0, 0])))
+    shift = math.hypot(W[0, 2], W[1, 2])
+    return shift <= max_shift_frac * max(h, w) and rot <= max_rot_deg
+
+
+def points_inside(params, shape, margin=2):
+    """True if every hinge/center/axis point lies inside the image."""
+    h, w = shape[:2]
+    for keys in POINT_KEYS:
+        pt = _get(params, keys)
+        if not (margin <= pt['x'] <= w - 1 - margin and margin <= pt['y'] <= h - 1 - margin):
+            return False
+    return True
+
+
+def clamp_to_image(params, shape, margin=2):
+    """Clamp every point into the image so handles always stay reachable."""
+    out = copy.deepcopy(params)
+    h, w = shape[:2]
+    for keys in POINT_KEYS:
+        pt = _get(out, keys)
+        pt['x'] = float(min(max(pt['x'], margin), w - 1 - margin))
+        pt['y'] = float(min(max(pt['y'], margin), h - 1 - margin))
+    return out
