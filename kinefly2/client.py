@@ -92,6 +92,12 @@ class Kinefly2Client:
         """Save a PNG of each camera's current frame; returns the paths."""
         return self.request(cmd='snapshot')['paths']
 
+    def zero(self, camera=None):
+        """Make the current posture the zero on all cameras (or one): landmark
+        templates are recaptured, area/rotation trackers restart. Logged as a
+        'zeroed' event when recording."""
+        return self.request(cmd='zero', camera=camera)['zeroed']
+
     @contextlib.contextmanager
     def recording(self, **fields):
         """with k.recording(fly_id='017', protocol='YAMV'): ...  (stops on exit)."""

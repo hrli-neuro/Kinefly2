@@ -130,8 +130,14 @@ def main():
                 session.start()
         except Exception as e:
             print('record: %s' % e)
-    for view in views.values():
+    def log_zeroed(name):
+        def cb(summary):
+            if events is not None:
+                events.log('{"event": "zeroed", "camera": "%s", "detail": "%s"}' % (name, summary))
+        return cb
+    for name, view in views.items():
         view.on_record = toggle_record
+        view.on_zeroed = log_zeroed(name)
 
     print('Kinefly2 up: cameras %s, primary %s' % (', '.join(cameras), primary))
     if rig.get('zmq_port'):

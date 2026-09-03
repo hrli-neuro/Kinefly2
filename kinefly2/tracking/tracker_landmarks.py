@@ -218,6 +218,22 @@ class LandmarkTracker(object):
         self.last_fit = None
         return sum(t is not None for t in self.templates)
 
+    def current_positions(self):
+        """Best estimate of where each landmark is right now: the matched
+        position when the match was accepted, else the fit's prediction."""
+        pos = self._predict()
+        if len(self.matched) == len(pos) and len(self.ok) == len(pos):
+            m = self.ok & np.isfinite(self.matched[:, 0])
+            pos[m] = self.matched[m]
+        return pos
+
+    def zero(self, image=None):
+        """Make the current posture the zero: recapture all templates."""
+        if image is None:
+            self.templates, self.templates_big, self.template_pts = [], [], None
+            return 0
+        return self.capture_templates(image)
+
     def _rotated_templates(self, theta):
         deg = -np.degrees(theta)          # cv2: positive = counter-clockwise on screen
         h = self.template_px // 2

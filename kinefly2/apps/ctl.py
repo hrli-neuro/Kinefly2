@@ -5,6 +5,7 @@
     python -m kinefly2.apps.ctl stop
     python -m kinefly2.apps.ctl event '{"trial": 1, "event": "stim_on"}'
     python -m kinefly2.apps.ctl snapshot
+    python -m kinefly2.apps.ctl zero [--camera front]     # this posture = zero (landmarks re-captured)
     python -m kinefly2.apps.ctl --host <rig-ip> status
 """
 import argparse
@@ -24,6 +25,8 @@ def main():
     sub.add_parser('ping')
     sub.add_parser('stop')
     sub.add_parser('snapshot')
+    z = sub.add_parser('zero')
+    z.add_argument('--camera', default=None)
     s = sub.add_parser('start')
     s.add_argument('--fly', dest='fly_id')
     s.add_argument('--protocol')
@@ -46,6 +49,8 @@ def main():
             r = k.event(args.text)
         elif args.cmd == 'snapshot':
             r = k.snapshot()
+        elif args.cmd == 'zero':
+            r = k.zero(args.camera)
         elif args.cmd == 'ping':
             r = k.ping()
         else:

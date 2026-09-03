@@ -174,6 +174,12 @@ class RecordingSession:
                 return {'ok': True, 'logged': logged, 'recording': self.recording}
             elif cmd == 'snapshot':
                 return {'ok': True, 'paths': self.snapshot()}
+            elif cmd == 'zero':
+                out = {}
+                for name, view in self.views.items():
+                    if req.get('camera') in (None, name):
+                        out[name] = view.zero_all()
+                return {'ok': True, 'zeroed': out}
             elif cmd == 'ping':
                 return {'ok': True, 'time': time.time()}
             else:

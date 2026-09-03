@@ -122,6 +122,7 @@ class TrackerView:
         self.paramsStartup = copy.deepcopy(self.params)   # 'reset' target
         self.paramsUndo = None                             # params before the last autoplace
         self.on_record = None      # Callback for the 'record' button (set by run_rig).
+        self.on_zeroed = None      # Callback(summary) after zero_all (run_rig logs an event).
         self.placingLandmark = None   # Part name while waiting for a click to add a landmark.
         self.rec_status = None     # Dict from RecordingSession.status()['session'] while recording.
 
@@ -234,6 +235,44 @@ class TrackerView:
         self.fly.set_params(self.scale_params(self.params, self.scale))
         self.refresh_landmark_templates(partname)
         self.save_params()
+
+    def zero_all(self):
+        """'This posture = zero' for every tracked part: landmark templates are
+        recaptured from the current frame; area/rotation trackers restart from
+        the next frame. No handle moves."""
+        with self.lock:
+            if self.imgScaled is None:
+                return None
+            done = []
+            moved = False
+            for partname in ('head', 'abdomen', 'left', 'right'):
+                if not self.params['gui'][partname]['track']:
+                    continue
+                part = getattr(self.fly, partname)
+                if hasattr(part, 'capture_templates'):
+                    # Move each landmark to where its feature is now, then cut the
+                    # templates there: the current posture becomes the zero.
+                    if len(part.ref_pts):
+                        pos = part.current_positions()
+                        self.params['gui'][partname]['landmarks'] = [
+                            {'x': float(x / self.scale), 'y': float(y / self.scale)} for x, y in pos]
+                        self.fly.set_params(self.scale_params(self.params, self.scale))
+                        moved = True
+                    n = part.capture_templates(self.imgScaled)
+                    part.save_templates(self.templates_path(partname))
+                    done.append('%s %d/%d landmarks' % (partname, n, len(part.ref_pts)))
+                elif hasattr(part, 'zero'):
+                    part.zero()
+                    done.append(partname)
+            summary = 'zeroed: ' + (', '.join(done) if done else 'nothing to zero')
+            self.statusText = summary
+            print('%s: %s' % (self.name, summary))
+            if moved:
+                self.fly.update_handle_points()
+                self.save_params(save_reference=False)
+        if self.on_zeroed is not None:
+            self.on_zeroed(summary)
+        return summary
 
     # ------------------------------------------------------------------ params
 
@@ -453,6 +492,7 @@ class TrackerView:
         add(type='pushbutton', name='save_bg', text='saveBG')
         add(type='pushbutton', name='autoplace', text='autoplace')
         add(type='pushbutton', name='reset', text='reset')
+        add(type='pushbutton', name='zero', text='zero')
         add(type='pushbutton', name='record', text='record')
         if self.landmark_parts():
             add(type='pushbutton', name='addlm', text='+lm')
@@ -827,6 +867,8 @@ class TrackerView:
                     self.autoplace()
                 elif self.nameSelected == self.nameSelectedNow == 'reset':
                     self.reset_params()
+                elif self.nameSelected == self.nameSelectedNow == 'zero':
+                    self.zero_all()
                 elif self.nameSelected == self.nameSelectedNow == 'record':
                     if self.on_record is not None:
                         self.on_record()

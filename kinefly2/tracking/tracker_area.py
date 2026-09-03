@@ -83,6 +83,18 @@ class AreaTracker(MotionTrackedBodypartPolar):
 
 
         
+    # zero()
+    # Make the current posture the zero: the next frame becomes the new
+    # comparison image and the observed range is reset.
+    def zero(self):
+        self.imgComparison = None
+        self.stateLo_p.angles = [4.0*np.pi]
+        self.stateHi_p.angles = [-4.0*np.pi]
+        self.stateLo_p.radii = [np.inf]
+        self.stateHi_p.radii = [-np.inf]
+        self.state.angles = [self.stateOrigin_p.angles[0]]
+        self.state.radii = [self.stateOrigin_p.radii[0]]
+
     # update_state()
     # Update the bodypart translation & rotation.
     #

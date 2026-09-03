@@ -108,7 +108,30 @@ def test_rigid_fit_and_matching():
     assert abs(scale2 - 1.5) < 1e-9 and abs(theta2 - th) < 1e-9
 
 
+def test_zero_recaptures_templates():
+    from tests.make_synthetic_video import draw_front_frame
+    from kinefly2.camera.base import Frame
+    from kinefly2.gui.app import TrackerView
+    d = tempfile.mkdtemp(); cfg = os.path.join(d, 'front.yaml')
+    img0, lm0 = draw_front_frame(0.0, 0.0)
+    make_config(cfg, [lm0[k] for k in ('eye_l', 'eye_r', 'patch', 'ant_l', 'ant_r')])
+    view = TrackerView('front', cfg, use_gui=False)
+    view.process(Frame(image=img0, t_camera=0, t_host=time.monotonic(), frame_id=0))
+    img1, _ = draw_front_frame(10.0, 0.0)               # head rolled 10 deg
+    st = view.process(Frame(image=img1, t_camera=0.1, t_host=time.monotonic(), frame_id=1))
+    assert abs(math.degrees(st.parts['head'].angles[0]) - 10) < 1.0
+    summary = view.zero_all()                           # this (rolled) posture = zero
+    assert 'head 5/5' in summary, summary
+    st = view.process(Frame(image=img1, t_camera=0.2, t_host=time.monotonic(), frame_id=2))
+    assert abs(math.degrees(st.parts['head'].angles[0])) < 0.3, st.parts['head'].angles
+    img2, _ = draw_front_frame(13.0, 0.0)               # 3 deg beyond the new zero
+    st = view.process(Frame(image=img2, t_camera=0.3, t_host=time.monotonic(), frame_id=3))
+    assert abs(math.degrees(st.parts['head'].angles[0]) - 3) < 0.7, st.parts['head'].angles
+    print('zero OK')
+
+
 if __name__ == '__main__':
     test_rigid_fit_and_matching()
     test_landmarks_separate_roll_and_yaw()
+    test_zero_recaptures_templates()
     print('OK')

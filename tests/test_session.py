@@ -92,10 +92,12 @@ def test_sessions_over_command_socket():
         st = k.status()
         assert st['recording'] and st['session']['name'] == info['name']
         assert st['session']['rows'] > 30, st['session']
+        z = k.zero()
+        assert set(z) == {'bottom', 'front'} and all('zeroed' in v for v in z.values()), z
         paths = k.snapshot()
         assert len(paths) == 2 and all(os.path.exists(p) for p in paths)
         summary = k.stop()
-        assert summary['events'] == 2, summary
+        assert summary['events'] == 2, summary   # 'zeroed' events only come from run_rig's callback
         assert summary['video']['bottom']['written'] > 30 and summary['video']['bottom']['dropped'] == 0
         assert pipelines['bottom'].n_frames > frames_before
 

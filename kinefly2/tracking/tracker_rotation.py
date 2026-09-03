@@ -35,6 +35,11 @@ class RotationTracker(AreaTracker):
         self.search_deg = float(self.params[self.name].get('search_deg', 8.0))
         self.coarse_step = 1.0 if self.search_deg <= 10 else 2.0
 
+    def zero(self):
+        AreaTracker.zero(self)
+        self.imgRef = None
+        self._bank = {}
+
     # --- measurement -------------------------------------------------------
 
     def _rotate(self, img, deg):

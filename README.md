@@ -126,6 +126,7 @@ with k.recording(fly_id='017', protocol='YAMV', notes='stripe fixation'):
 # recording stops when the block ends (also on exceptions)
 k.status()                                         # recording?, per-camera fps/frames, last session
 k.snapshot()                                       # PNG of each camera's current frame
+k.zero()                                           # this posture = zero (after the fly settles)
 ```
 
 The same works from a terminal: `python -m kinefly2.apps.ctl start --fly 017 --protocol YAMV`,
@@ -236,6 +237,11 @@ head) separates the two:
 2. The posture at the moment you place/move a landmark becomes the zero
    (reference patches are captured then and stored as
    `config/templates_<camera>_head.npz`). Put the hinge on the neck.
+   To re-zero later without touching the landmarks — e.g. after mounting
+   a new fly, once it has settled — press `zero` (recaptures all landmark
+   templates from the current frame; `area`/`rotation` trackers restart
+   too), or from a script `k.zero()` / `ctl zero`; a `zeroed` event is
+   written to the recording so you know which posture the angles refer to.
 3. Each frame, every landmark is located by template matching and a rigid
    fit of the landmark set gives **roll** (its rotation) and **yaw** (its
    lateral shift after removing the shift a roll about the neck produces,
@@ -269,7 +275,8 @@ track median in the low milliseconds.
 - **Toolbar:** `exit`; `saveBG` (capture the current image as the background
   for subtraction — do it with the fly absent or not illuminated);
   `autoplace` (place all regions automatically from the current image, see
-  below); `reset` (undo autoplace / restore the startup layout);
+  below); `reset` (undo autoplace / restore the startup layout); `zero` (this
+  posture = zero for all trackers: landmark templates recaptured);
   `track: H A L R X` (toggle head/abdomen/left/right/aux);
   `subtract: H A LR X` (background subtraction per part); `invertcolor`
   (set if the fly is dark on a bright background); `stabilize`; `symmetric`
