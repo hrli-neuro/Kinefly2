@@ -122,6 +122,7 @@ class TrackerView:
         self.paramsStartup = copy.deepcopy(self.params)   # 'reset' target
         self.paramsUndo = None                             # params before the last autoplace
         self.on_record = None      # Callback for the 'record' button (set by run_rig).
+        self.placingLandmark = None   # Part name while waiting for a click to add a landmark.
         self.rec_status = None     # Dict from RecordingSession.status()['session'] while recording.
 
         self.bMousing = False
@@ -155,6 +156,10 @@ class TrackerView:
         else:
             self.bHaveBackground = False
 
+        for partname in ('head', 'abdomen', 'left', 'right'):
+            part = getattr(self.fly, partname)
+            if hasattr(part, 'load_templates'):
+                part.load_templates(self.templates_path(partname))
         self.nameSelected = None
         self.uiSelected = None
         self.stateSelected = None
@@ -188,6 +193,45 @@ class TrackerView:
             cv2.namedWindow(self.window_name, 1)
             cv2.setMouseCallback(self.window_name, self.on_mouse, param=None)
 
+    # --------------------------------------------------------------- landmarks
+
+    def landmark_parts(self):
+        return [p for p in ('head', 'abdomen', 'left', 'right')
+                if self.params[p].get('tracker') == 'landmarks']
+
+    def templates_path(self, partname):
+        cfg_dir = os.path.dirname(os.path.abspath(self.config_path))
+        return os.path.join(cfg_dir, 'templates_%s_%s.npz' % (self.name, partname))
+
+    def refresh_landmark_templates(self, partname):
+        """Re-capture the reference patches from the current frame (after the
+        landmarks were placed/moved) and persist them next to the config."""
+        part = getattr(self.fly, partname)
+        if self.imgScaled is None or not hasattr(part, 'capture_templates'):
+            return
+        n = part.capture_templates(self.imgScaled)
+        part.save_templates(self.templates_path(partname))
+        self.statusText = '%s: %d/%d landmark templates captured (this posture = zero)' % (
+            partname, n, len(part.ref_pts))
+        if getattr(part, 'weak', None):
+            self.statusText += '  NO TEXTURE at lm%s - move onto an edge/feature' % ','.join(
+                str(k) for k in part.weak)
+
+    def add_landmark(self, partname, pt):
+        lms = self.params['gui'][partname].setdefault('landmarks', [])
+        lms.append({'x': float(pt[0]), 'y': float(pt[1])})
+        self.fly.set_params(self.scale_params(self.params, self.scale))
+        self.refresh_landmark_templates(partname)
+        self.save_params()
+
+    def remove_landmark(self, partname):
+        lms = self.params['gui'][partname].get('landmarks') or []
+        if lms:
+            lms.pop()
+        self.fly.set_params(self.scale_params(self.params, self.scale))
+        self.refresh_landmark_templates(partname)
+        self.save_params()
+
     # ------------------------------------------------------------------ params
 
     def legalize_params(self, paramsIn):
@@ -216,6 +260,13 @@ class TrackerView:
             paramsScaled['gui'][partname]['center']['y'] = paramsIn['gui'][partname]['center']['y'] * scale
             paramsScaled['gui'][partname]['radius1'] = paramsIn['gui'][partname]['radius1'] * scale
             paramsScaled['gui'][partname]['radius2'] = paramsIn['gui'][partname]['radius2'] * scale
+        for partname in ['head', 'abdomen', 'left', 'right']:
+            lms = paramsIn['gui'][partname].get('landmarks')
+            if lms:
+                paramsScaled['gui'][partname]['landmarks'] = [
+                    {'x': p['x'] * scale, 'y': p['y'] * scale} for p in lms]
+            if paramsIn['gui'][partname].get('yaw_radius'):
+                paramsScaled['gui'][partname]['yaw_radius'] = paramsIn['gui'][partname]['yaw_radius'] * scale
         for partname in ['axis']:
             for tag in ['pt1', 'pt2']:
                 paramsScaled['gui'][partname][tag]['x'] = paramsIn['gui'][partname][tag]['x'] * scale
@@ -376,6 +427,9 @@ class TrackerView:
         add(type='pushbutton', name='autoplace', text='autoplace')
         add(type='pushbutton', name='reset', text='reset')
         add(type='pushbutton', name='record', text='record')
+        if self.landmark_parts():
+            add(type='pushbutton', name='addlm', text='+lm')
+            add(type='pushbutton', name='dellm', text='-lm')
         add(type='static', name='track', text='track:',
             sides=ui.SIDE_LEFT | ui.SIDE_TOP | ui.SIDE_BOTTOM)
         for partname, label in (('head', 'H'), ('abdomen', 'A'), ('left', 'L'),
@@ -535,6 +589,14 @@ class TrackerView:
 
         paramsScaled = self.scale_params(self.params, self.scale)
 
+        if tagSelected is not None and tagSelected.startswith('lm'):
+            k = int(tagSelected[2:])
+            lms = paramsScaled['gui'][partnameSelected].get('landmarks') or []
+            if k < len(lms):
+                lms[k] = {'x': float(ptMouse[0]), 'y': float(ptMouse[1])}
+            self.params = self.scale_params(paramsScaled, 1 / self.scale)
+            return
+
         if tagSelected == 'hinge':
             if partnameSelected in ('head', 'abdomen'):
                 if paramsScaled['gui']['symmetric']:
@@ -682,6 +744,13 @@ class TrackerView:
             return
         ptMouse = np.array([x, y]).clip((0, 0), (self.shapeImage[1], self.shapeImage[0]))
 
+        if event == cv2.EVENT_LBUTTONDOWN and self.placingLandmark is not None:
+            partname, self.placingLandmark = self.placingLandmark, None
+            if y > self.yToolbar:
+                self.add_landmark(partname, ptMouse)
+            else:
+                self.statusText = 'landmark placement cancelled'
+            return
         if event == cv2.EVENT_LBUTTONDOWN:
             self.bMousing = True
             (uiHit, tag, partname, iButtonSelected) = self.hit_object(ptMouse)
@@ -734,6 +803,16 @@ class TrackerView:
                 elif self.nameSelected == self.nameSelectedNow == 'record':
                     if self.on_record is not None:
                         self.on_record()
+                elif self.nameSelected == self.nameSelectedNow == 'addlm':
+                    parts = self.landmark_parts()
+                    if parts:
+                        self.placingLandmark = parts[0]
+                        self.statusText = 'click on the %s to add landmark %d' % (
+                            parts[0], len(self.params['gui'][parts[0]].get('landmarks') or []))
+                elif self.nameSelected == self.nameSelectedNow == 'dellm':
+                    parts = self.landmark_parts()
+                    if parts:
+                        self.remove_landmark(parts[0])
 
             elif self.uiSelected == 'checkbox':
                 if self.nameSelected == self.nameSelectedNow:
@@ -782,6 +861,9 @@ class TrackerView:
             if self.uiSelected in ('handle', 'checkbox'):
                 self.fly.set_params(self.scale_params(self.params, self.scale))
                 self.fly.create_masks(self.shapeImage)
+                if self.uiSelected == 'handle' and self.tagSelected and \
+                        self.tagSelected.startswith('lm'):
+                    self.refresh_landmark_templates(self.partnameSelected)
             self.save_params()
 
             self.bMousing = False

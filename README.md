@@ -208,7 +208,46 @@ traces of L, R, L−R, head yaw/roll and wingbeat frequency. It is a separate
 process reading the ZMQ stream, so it adds no load to the tracker, and the
 page has no external dependencies (works on an offline rig network).
 
-### 2.5 Timing validation
+### 2.5 Front camera: head roll and yaw from landmarks
+
+From the front, the head's motion under a stimulus is a **combination of roll
+and yaw**: yaw shifts the head features sideways, roll rotates them in the
+image plane. The hinge-based trackers (`edge`/`area`/`rotation`) assume a pure
+rotation about a fixed point, so yaw corrupts their roll estimate and no hinge
+placement works. The `landmarks` tracker (default for the front camera's
+head) separates the two:
+
+1. Click `+lm`, then click on a distinctive head feature; repeat for 4–6
+   landmarks spread over the head: the **edges of both eyes**, the **bright
+   inter-ocular patch**, the **antenna bases**. Landmarks must sit on texture
+   or an edge (a point inside a uniform blob cannot be matched — the tracker
+   marks such a landmark with a red ring and says so in the status line).
+   Landmarks are draggable handles; `-lm` removes the last one.
+   **Avoid specular highlights** (the bright glints on the curved eye/head
+   surface under IR illumination): they stay where the surface faces the
+   light while the head turns, so they are not attached to the head. Use
+   the eye outline, ommatidia/bristle texture, the inter-ocular stripe and
+   the antenna bases. The overlay prints `NON-RIGID x px` when the landmark
+   set does not move as one body (highlights, legs, proboscis, or a lost
+   match) — a quick way to validate a landmark set on a recording.
+2. The posture at the moment you place/move a landmark becomes the zero
+   (reference patches are captured then and stored as
+   `config/templates_<camera>_head.npz`). Put the hinge on the neck.
+3. Each frame, every landmark is located by template matching and a rigid
+   fit of the landmark set gives **roll** (its rotation) and **yaw** (its
+   lateral shift after removing the shift a roll about the neck produces,
+   converted to an angle with the neck→head distance, `yaw_radius`).
+
+Outputs: `angles = [roll, yaw]` (radians), `radii = [dx, dy]` (head shift,
+px), fit residual and match quality; logged as `front/head_angle` (roll),
+`front/head_yaw`, `head_dx`, `head_dy`, `head_fit_residual`, `head_score`.
+The dashboard overlays the front-view yaw on the bottom camera's head yaw as a
+check of the separation (the bottom view remains the authoritative yaw).
+Parameters (`tracker: head:`): `template_px`, `search_px`, `min_score`,
+`fit: rigid|similarity`, `rotate_templates`, `smooth`. Cost ≈ 0.3–0.6 ms.
+Focus and magnification of the front camera matter more than frame rate.
+
+### 2.6 Timing validation
 
 ```bash
 python -m kinefly2.apps.check_latency config/camera_bottom.yaml --seconds 30
@@ -217,7 +256,7 @@ python -m kinefly2.apps.check_latency config/camera_bottom.yaml --seconds 30
 Healthy rig numbers at 90 Hz: interval median ≈ 11.1 ms, dropped frames = 0,
 track median in the low milliseconds.
 
-### 2.6 GUI controls (same UX as Kinefly)
+### 2.7 GUI controls (same UX as Kinefly)
 
 - **Handles (drag with mouse):** head/abdomen hinge points define the body
   axis; wing hinge points sit on the wing bases; for each part, the two line
@@ -317,11 +356,12 @@ apply). Anything missing falls back to `tracker_defaults()`.
 
 | Key | Meaning |
 |---|---|
-| `tracker` | Algorithm: `edge` (radial edge angle — wings, or antennae for head yaw), `area` (rotation via polar image registration — head), `rotation` (rotation via template rotation search about the hinge — small angles such as head roll from the front; ~1 ms/frame), `tip` (farthest point — abdomen), `intensity` (mean intensity + wingbeat frequency — aux). |
+| `tracker` | Algorithm: `edge` (radial edge angle — wings, or antennae for head yaw), `area` (rotation via polar image registration — head), `rotation` (rotation via template rotation search about the hinge; ~1 ms/frame), `landmarks` (user-placed landmarks + rigid fit → roll and yaw separately; the front-camera head default, section 2.5), `tip` (farthest point — abdomen), `intensity` (mean intensity + wingbeat frequency — aux). |
 | `autozero` | Auto-center the reported angle on the resting position. |
 | `threshold` | Edge-strength threshold (edge tracker); 0 = accept all. |
 | `feathering` | Softening of mask edges (0–1). |
 | `search_deg` | `rotation` tracker only: half-range of the rotation search in degrees (default 8). |
+| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth` | `landmarks` tracker only: patch size, search radius, acceptance threshold, `rigid`/`similarity` fit, rotated re-matching for large rolls, output EMA. Landmark positions live in `gui.<part>.landmarks`, the yaw lever arm in `gui.<part>.yaw_radius`. |
 | `polar_amplify` | Angular resolution multiplier of the polar transform (default 1.0). Raise (2–4) to resolve small rotations (e.g. head roll of a few degrees) at the cost of ~1–3 ms/frame for that part. |
 | `saturation_correction` | Compensate saturated pixels when background-subtracting. |
 
@@ -361,7 +401,7 @@ the device clock; `t_wall` is `time.time()`). Events: `/events/t_host`, `/events
   independent system with its own config, background and reference files.
 - **Different views / body parts:** each camera YAML is independent — e.g. use
   the front camera's `left`/`right` edge trackers for wing-envelope roll edges
-  and its `head` area tracker for head roll. Head yaw from below can use
+  and its `head` `landmarks` tracker for head roll + yaw (section 2.5). Head yaw from below can use
   `tracker: edge` with a narrow annulus over the antennae instead of `area`.
 - **Different frame rate:** set `fps` in the camera YAML; nothing else assumes
   90 Hz.
@@ -409,6 +449,7 @@ tests/               synthetic-video generator + ground-truth and architecture t
       head-roll angles.
 - [x] Continuous operation with script-triggered recording sessions (command
       socket + Python client + CLI + GUI record button), camera reconnect.
+- [x] Front-camera head roll + yaw via landmark tracking (`landmarks` tracker).
 - [ ] Live PySpin validation at 90 Hz on the rig (pending the Linux machine
       and FLIR cameras).
 - [ ] Reiser LED-panel closed-loop sink (pending the arena). Verify the

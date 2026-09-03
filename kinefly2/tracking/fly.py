@@ -10,6 +10,7 @@ from .tracker_edge import EdgeTrackerByIntensityProfile, EdgeTrackerByHoughTrans
 from .tracker_tip import TipTracker
 from .tracker_intensity import IntensityTracker
 from .tracker_rotation import RotationTracker
+from .tracker_landmarks import LandmarkTracker
 from . import ui
 from . import imageprocessing
 
@@ -36,13 +37,15 @@ class Fly(object):
             self.head    = EdgeTracker(name='head',      params=params, color='red',    bEqualizeHist=False)
         elif (params['head']['tracker']=='tip'):
             self.head    = TipTracker(name='head',       params=params, color='purple',    bEqualizeHist=False)
+        elif (params['head']['tracker']=='landmarks'):
+            self.head    = LandmarkTracker(name='head',      params=params, color='green',    bEqualizeHist=False)
         elif (params['head']['tracker']=='rotation'):
             self.head    = RotationTracker(name='head',      params=params, color='green',    bEqualizeHist=False)
         elif (params['head']['tracker']=='intensity'):
             self.head    = IntensityTracker(name='head', params=params, color='hot_pink',    bEqualizeHist=False)
         else:
-            #rospy.logwarn('Head tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'']')
-            print('Head tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'']')
+            #rospy.logwarn('Head tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
+            print('Head tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
 
         # Create the abdomen tracker.
         if (params['abdomen']['tracker']=='area'):
@@ -51,13 +54,15 @@ class Fly(object):
             self.abdomen    = EdgeTracker(name='abdomen',      params=params, color='red',    bEqualizeHist=False)
         elif (params['abdomen']['tracker']=='tip'):
             self.abdomen    = TipTracker(name='abdomen',       params=params, color='purple',    bEqualizeHist=False)
+        elif (params['abdomen']['tracker']=='landmarks'):
+            self.abdomen    = LandmarkTracker(name='abdomen',      params=params, color='green',    bEqualizeHist=False)
         elif (params['abdomen']['tracker']=='rotation'):
             self.abdomen    = RotationTracker(name='abdomen',      params=params, color='green',    bEqualizeHist=False)
         elif (params['abdomen']['tracker']=='intensity'):
             self.abdomen    = IntensityTracker(name='abdomen', params=params, color='hot_pink',    bEqualizeHist=False)
         else:
-            #rospy.logwarn('Abdomen tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'']')
-             print('Abdomen tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'']')
+            #rospy.logwarn('Abdomen tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
+             print('Abdomen tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
 
         # Create the right wing tracker.        
         if (params['right']['tracker']=='area'):
@@ -66,13 +71,15 @@ class Fly(object):
             self.right    = EdgeTracker(name='right',      params=params, color='red',    bEqualizeHist=False)
         elif (params['right']['tracker']=='tip'):
             self.right    = TipTracker(name='right',       params=params, color='purple',    bEqualizeHist=False)
+        elif (params['right']['tracker']=='landmarks'):
+            self.right    = LandmarkTracker(name='right',      params=params, color='green',    bEqualizeHist=False)
         elif (params['right']['tracker']=='rotation'):
             self.right    = RotationTracker(name='right',      params=params, color='green',    bEqualizeHist=False)
         elif params['right']['tracker']== 'intensity':
             self.right    = IntensityTracker(name='right', params=params, color='hot_pink',    bEqualizeHist=False)
         else:
-            #rospy.logwarn('Right wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'']')
-            print('Right wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'']')
+            #rospy.logwarn('Right wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
+            print('Right wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
              
         # Create the left wing tracker.        
         if (params['left']['tracker']=='area'):
@@ -81,13 +88,15 @@ class Fly(object):
             self.left    = EdgeTracker(name='left',      params=params, color='red',    bEqualizeHist=False)
         elif (params['left']['tracker']=='tip'):
             self.left    = TipTracker(name='left',       params=params, color='purple',    bEqualizeHist=False)
+        elif (params['left']['tracker']=='landmarks'):
+            self.left    = LandmarkTracker(name='left',      params=params, color='green',    bEqualizeHist=False)
         elif (params['left']['tracker']=='rotation'):
             self.left    = RotationTracker(name='left',      params=params, color='green',    bEqualizeHist=False)
         elif (params['left']['tracker']=='intensity'):
             self.left    = IntensityTracker(name='left', params=params, color='hot_pink',    bEqualizeHist=False)
         else:
-            #rospy.logwarn('Left wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'']')
-            print('Left wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'']')
+            #rospy.logwarn('Left wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
+            print('Left wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
              
         # Create the aux tracker.        
         self.aux    = IntensityTracker(name='aux',    params=params, color='yellow',    bEqualizeHist=False)

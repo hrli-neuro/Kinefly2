@@ -12,8 +12,13 @@ tracker:
   wingbeat_min: 180
   wingbeat_max: 220
   head:
-    tracker: rotation
-    search_deg: 8
+    tracker: landmarks   # Head roll AND yaw from user-placed landmarks (eyes, bright inter-ocular
+    template_px: 25      #   patch, antenna bases) tracked by template matching + a rigid fit:
+    search_px: 20        #   rotation = roll, lateral shift = yaw. Place 4-5 landmarks in the GUI
+    min_score: 0.5       #   (+lm button). Focus/magnification matter more than frame rate here.
+    fit: rigid
+    rotate_templates: true
+    smooth: 0.0
     autozero: true
     threshold: 0.0
     feathering: 0.25
@@ -55,12 +60,12 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 130.25989523530006
-        y: 178.9005873799324
-      radius_outer: 70.0
-      radius_inner: 30.0
+        x: 202.0
+        y: 180.0
+      radius_outer: 67.42403132415029
+      radius_inner: 42.04759208325728
       angle_hi: 0.8727
-      angle_lo: -0.8727
+      angle_lo: -0.9564522470221135
     abdomen:
       track: false
       subtract_bg: false

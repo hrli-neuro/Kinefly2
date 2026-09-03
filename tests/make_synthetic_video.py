@@ -154,3 +154,50 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# --- Synthetic FRONT view (head seen face-on) --------------------------------
+# Used by test_landmarks.py: a head with two eye blobs, a bright inter-ocular
+# patch and antenna bases, driven by INDEPENDENT roll (in-plane rotation about
+# the neck) and yaw (lateral shift + eye foreshortening) signals.
+FRONT_NECK = (176.0, 230.0)     # neck point (bottom of the head), image px
+FRONT_HEAD_R = 55.0             # distance neck -> head center
+
+
+def draw_front_frame(roll_deg, yaw_deg, blur_sigma=0.0):
+    """Returns (image, landmark_truth) where landmark_truth is the list of the
+    nominal landmark image positions for this frame (eyes, patch, antennae)."""
+    img = np.zeros((H, W), dtype=np.uint8)
+    nx, ny = FRONT_NECK
+    roll = math.radians(roll_deg)
+    # Yaw: the head turns about its vertical axis -> features shift sideways
+    # in the image, and the eye on the far side is foreshortened.
+    yaw_shift = FRONT_HEAD_R * math.sin(math.radians(yaw_deg)) * 0.6
+    cx = nx + yaw_shift + FRONT_HEAD_R * math.sin(roll)
+    cy = ny - FRONT_HEAD_R * math.cos(roll)
+
+    def place(dx, dy):
+        # (dx, dy) in the head frame (x right, y up), rotated by roll.
+        x = cx + dx * math.cos(roll) + dy * math.sin(roll)
+        y = cy + dx * math.sin(roll) - dy * math.cos(roll)
+        return x, y
+
+    cv2.circle(img, (int(round(cx)), int(round(cy))), 46, 110, -1)        # head capsule
+    fore = math.cos(math.radians(yaw_deg))
+    lm = {}
+    for name, dx, dy in (('eye_l', -30, 4), ('eye_r', 30, 4)):
+        x, y = place(dx * (1.0 if (dx < 0) == (yaw_deg < 0) else max(0.5, fore)), dy)
+        axes = (int(14 * (max(0.5, fore) if (dx < 0) != (yaw_deg < 0) else 1.0)), 18)
+        cv2.ellipse(img, ((x, y), (axes[0] * 2, axes[1] * 2), roll_deg), 40, -1)
+        cv2.circle(img, (int(round(x)), int(round(y))), 3, 200, -1)       # glint: texture to match
+        lm[name] = (x, y)
+    x, y = place(0, 8)
+    cv2.circle(img, (int(round(x)), int(round(y))), 9, 230, -1)             # bright inter-ocular patch
+    lm['patch'] = (x, y)
+    for name, dx in (('ant_l', -11), ('ant_r', 11)):
+        x, y = place(dx, -14)
+        cv2.circle(img, (int(round(x)), int(round(y))), 4, 20, -1)          # antenna bases (dark)
+        lm[name] = (x, y)
+    if blur_sigma > 0:
+        img = cv2.GaussianBlur(img, (0, 0), blur_sigma)
+    return img, lm

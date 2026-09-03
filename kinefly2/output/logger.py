@@ -25,6 +25,7 @@ import numpy as np
 from .base import FlystateSink
 
 PARTS = ('head', 'abdomen', 'left', 'right')
+HEAD_EXTRA = ('yaw', 'dx', 'dy', 'fit_residual', 'score')
 CHUNK = 1024
 
 
@@ -54,6 +55,8 @@ class Hdf5Logger(FlystateSink):
                 add('%s/%s_radius' % (cam, part))
             add('%s/aux_intensity' % cam)
             add('%s/aux_freq' % cam)
+            for col in HEAD_EXTRA:          # landmarks tracker: yaw etc. (NaN otherwise)
+                add('%s/head_%s' % (cam, col))
         add('events/t_host')
         add('events/t_wall')
         add('events/text', h5py.string_dtype())
@@ -77,6 +80,8 @@ class Hdf5Logger(FlystateSink):
                     row['%s/%s_radius' % (cam, part)] = math.nan
                 row['%s/aux_intensity' % cam] = math.nan
                 row['%s/aux_freq' % cam] = math.nan
+                for col in HEAD_EXTRA:
+                    row['%s/head_%s' % (cam, col)] = math.nan
                 continue
             row['%s/seq' % cam] = cs.seq
             row['%s/t_camera' % cam] = cs.t_camera
@@ -89,6 +94,13 @@ class Hdf5Logger(FlystateSink):
             aux = cs.parts.get('aux')
             row['%s/aux_intensity' % cam] = aux.intensity if aux else math.nan
             row['%s/aux_freq' % cam] = aux.freq if aux else math.nan
+            hd = cs.parts.get('head')
+            lm = hd is not None and len(hd.angles) >= 2 and len(hd.radii) >= 2
+            row['%s/head_yaw' % cam] = hd.angles[1] if lm else math.nan
+            row['%s/head_dx' % cam] = hd.radii[0] if lm else math.nan
+            row['%s/head_dy' % cam] = hd.radii[1] if lm else math.nan
+            row['%s/head_fit_residual' % cam] = hd.gradients[0] if (lm and hd.gradients) else math.nan
+            row['%s/head_score' % cam] = hd.intensity if lm else math.nan
         try:
             self.queue.put_nowait(('state', row))
         except queue.Full:

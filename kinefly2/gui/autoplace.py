@@ -32,6 +32,15 @@ def _get(d, keys):
     return d
 
 
+def _all_points(params):
+    """Every image-space point dict in the params: hinges/centers/axis points
+    and any per-part landmark lists."""
+    pts = [_get(params, keys) for keys in POINT_KEYS]
+    for part in ('head', 'abdomen', 'left', 'right'):
+        pts.extend(params['gui'][part].get('landmarks') or [])
+    return pts
+
+
 def body_mask(params, shape, margin=1.0):
     """Disk around the body (between head and abdomen hinges), used to focus
     the registration on the fly rather than on the wings/background."""
@@ -72,8 +81,7 @@ def register(ref, cur, mask=None, allow_scale=False):
 def transform_params(params, W):
     """Apply W to every image-space point in the params (unscaled pixels)."""
     out = copy.deepcopy(params)
-    for keys in POINT_KEYS:
-        pt = _get(out, keys)
+    for pt in _all_points(out):
         v = W @ np.array([pt['x'], pt['y'], 1.0])
         pt['x'], pt['y'] = float(v[0]), float(v[1])
     rot = math.atan2(W[1, 0], W[0, 0])
@@ -155,8 +163,7 @@ def plausible_transform(W, shape, max_shift_frac=0.25, max_rot_deg=30.0):
 def points_inside(params, shape, margin=2):
     """True if every hinge/center/axis point lies inside the image."""
     h, w = shape[:2]
-    for keys in POINT_KEYS:
-        pt = _get(params, keys)
+    for pt in _all_points(params):
         if not (margin <= pt['x'] <= w - 1 - margin and margin <= pt['y'] <= h - 1 - margin):
             return False
     return True
@@ -166,8 +173,7 @@ def clamp_to_image(params, shape, margin=2):
     """Clamp every point into the image so handles always stay reachable."""
     out = copy.deepcopy(params)
     h, w = shape[:2]
-    for keys in POINT_KEYS:
-        pt = _get(out, keys)
+    for pt in _all_points(out):
         pt['x'] = float(min(max(pt['x'], margin), w - 1 - margin))
         pt['y'] = float(min(max(pt['y'], margin), h - 1 - margin))
     return out

@@ -35,10 +35,10 @@ class StateBuffer:
         self.thread.start()
 
     @staticmethod
-    def _angle(state, cam, part):
+    def _angle(state, cam, part, i=0):
         try:
             a = state['cameras'][cam]['parts'][part]['angles']
-            return a[0] if a else None
+            return a[i] if len(a) > i else None
         except KeyError:
             return None
 
@@ -57,6 +57,7 @@ class StateBuffer:
             for cam in cams:
                 for part in ('left', 'right', 'head', 'abdomen'):
                     row['%s/%s' % (cam, part)] = self._angle(state, cam, part)
+                row['%s/head_yaw' % cam] = self._angle(state, cam, 'head', 1)
                 try:
                     row['%s/wbf' % cam] = state['cameras'][cam]['parts']['aux']['freq']
                 except KeyError:
@@ -95,6 +96,7 @@ const specs=[
  {title:'L − R (bottom)', keys:['L-R'], colors:['#fd5'], unit:'rad', zero:true},
  {title:'Head yaw (bottom)', keys:['bottom/head'], colors:['#8f8'], unit:'rad', zero:true},
  {title:'Head roll (front)', keys:['front/head'], colors:['#c8f'], unit:'rad', zero:true},
+ {title:'Head yaw: bottom (green) vs front landmarks (purple)', keys:['bottom/head','front/head_yaw'], colors:['#8f8','#c8f'], unit:'rad', zero:true},
  {title:'Wingbeat frequency (bottom aux)', keys:['bottom/wbf'], colors:['#fa6'], unit:'Hz'},
 ];
 const data=[]; let last=null, n=0, t0=null;
