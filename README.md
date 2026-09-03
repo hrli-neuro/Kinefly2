@@ -217,7 +217,10 @@ rotation about a fixed point, so yaw corrupts their roll estimate and no hinge
 placement works. The `landmarks` tracker (default for the front camera's
 head) separates the two:
 
-1. Click `+lm`, then click on a distinctive head feature; repeat for 4–6
+1. Make sure the camera's YAML has `head: tracker: landmarks` (the
+   `+lm`/`-lm` buttons appear only then; restart after changing it — the
+   startup line `front: trackers head=landmarks ...` confirms it).
+   Click `+lm`, then click on a distinctive head feature; repeat for 4–6
    landmarks spread over the head: the **edges of both eyes**, the **bright
    inter-ocular patch**, the **antenna bases**. Landmarks must sit on texture
    or an edge (a point inside a uniform blob cannot be matched — the tracker
@@ -271,7 +274,10 @@ track median in the low milliseconds.
   `subtract: H A LR X` (background subtraction per part); `invertcolor`
   (set if the fly is dark on a bright background); `stabilize`; `symmetric`
   (mirror left/right edits); `windows` (extra debug windows).
-- **Every mouse-up saves the parameters back into that camera's YAML** and
+- **Every mouse-up saves the GUI-owned parameters (regions, flags) back into
+  that camera's YAML**, merged into the file as it is on disk — hand edits
+  made while Kinefly2 runs (tracker types, thresholds) are kept, with a
+  console note when a tracker type changed on disk (restart to apply) — and
   stores the current frame as `config/reference_<camera>.png`, the frame the
   regions were tuned on.
 

@@ -189,6 +189,9 @@ class TrackerView:
         self.shapeToolbar = (0, 0)
         self.ibtnInvertColor = None
 
+        print('%s: trackers  %s' % (name, '  '.join(
+            '%s=%s' % (p, self.params[p]['tracker']) for p in ('head', 'abdomen', 'left', 'right')
+            if self.params['gui'][p]['track'])))
         if self.use_gui:
             cv2.namedWindow(self.window_name, 1)
             cv2.setMouseCallback(self.window_name, self.on_mouse, param=None)
@@ -273,10 +276,34 @@ class TrackerView:
                 paramsScaled['gui'][partname][tag]['y'] = paramsIn['gui'][partname][tag]['y'] * scale
         return paramsScaled
 
+    GUI_OWNED = ('gui', 'invertcolor')   # the only tracker keys the GUI writes back
+
     def save_params(self, save_reference=True):
-        self.config['tracker'] = self.params
+        """Write the GUI-owned parameters back into the camera YAML, merging
+        into whatever is on disk now, so hand edits made while Kinefly2 is
+        running (tracker types, thresholds, camera settings) are never
+        overwritten by a click."""
+        try:
+            with open(self.config_path) as f:
+                on_disk = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError):
+            on_disk = dict(self.config)
+        tracker = on_disk.get('tracker') or {}
+        for key in self.GUI_OWNED:
+            if key in self.params:
+                tracker[key] = copy.deepcopy(self.params[key])
+        on_disk['tracker'] = tracker
+        self.config = on_disk
         with open(self.config_path, 'w') as f:
-            yaml.safe_dump(self.config, f, sort_keys=False)
+            yaml.safe_dump(on_disk, f, sort_keys=False)
+        # Tell the user when the file now asks for a different tracker type
+        # than the one running (needs a restart to take effect).
+        for part in ('head', 'abdomen', 'left', 'right'):
+            want = (tracker.get(part) or {}).get('tracker')
+            have = (self.params.get(part) or {}).get('tracker')
+            if want and have and want != have:
+                print("%s: %s tracker is now '%s' on disk (running '%s') - restart to use it"
+                      % (os.path.basename(self.config_path), part, want, have))
         # The frame the regions were tuned on becomes the autoplace reference.
         if save_reference and self.imgUnscaled is not None:
             cv2.imwrite(self.filenameReference, self.imgUnscaled)

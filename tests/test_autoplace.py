@@ -142,8 +142,45 @@ def test_safety_and_reset():
     assert abs(view.params['gui']['head']['hinge']['x'] - startup['x']) < 1e-6
     print('safety/reset OK')
 
+def test_save_params_keeps_hand_edits():
+    """A click must not overwrite hand edits made to the YAML after launch."""
+    ensure_synthetic()
+    import shutil
+    import tempfile
+    import time
+    import yaml
+    from kinefly2.camera.base import Frame
+    from kinefly2.gui.app import TrackerView
+
+    d = tempfile.mkdtemp()
+    cfg = os.path.join(d, 'cam.yaml')
+    shutil.copy(VID_CFG, cfg)
+    view = TrackerView('cam', cfg, use_gui=False)
+    view.process(Frame(image=load_frame(0), t_camera=0.0, t_host=time.monotonic(), frame_id=0))
+
+    # Hand edits while "running": tracker type, a threshold, a camera setting.
+    on_disk = yaml.safe_load(open(cfg))
+    on_disk['tracker']['head']['tracker'] = 'landmarks'
+    on_disk['tracker']['left']['threshold'] = 0.42
+    on_disk['camera']['note'] = 'edited by hand'
+    with open(cfg, 'w') as f:
+        yaml.safe_dump(on_disk, f)
+
+    # A GUI edit: move the head hinge, then the mouse-up save.
+    view.params['gui']['head']['hinge']['x'] += 7
+    view.save_params()
+
+    after = yaml.safe_load(open(cfg))
+    assert after['tracker']['head']['tracker'] == 'landmarks', 'hand-edited tracker type lost'
+    assert after['tracker']['left']['threshold'] == 0.42, 'hand-edited threshold lost'
+    assert after['camera']['note'] == 'edited by hand', 'camera section lost'
+    assert after['tracker']['gui']['head']['hinge']['x'] == view.params['gui']['head']['hinge']['x'], 'GUI edit not saved'
+    print('merge-on-save OK')
+
+
 if __name__ == '__main__':
     test_register_known_transform()
     test_silhouette_bootstrap()
     test_safety_and_reset()
+    test_save_params_keeps_hand_edits()
     print('OK')
