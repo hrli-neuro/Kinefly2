@@ -37,6 +37,7 @@ class Hdf5Logger(FlystateSink):
         self.datasets = {}
         self.n = 0
         self.n_events = 0
+        self.closed = False
 
         def add(name, dtype='f8'):
             self.datasets[name] = self.file.create_dataset(
@@ -62,6 +63,8 @@ class Hdf5Logger(FlystateSink):
         self.thread.start()
 
     def handle(self, merged):
+        if self.closed:
+            return
         row = {'merged/seq': merged.seq, 'merged/t_host': merged.t_host,
                'merged/t_wall': time.time()}
         for cam in self.cameras:
@@ -93,6 +96,8 @@ class Hdf5Logger(FlystateSink):
 
     def log_event(self, text, t_host=None, t_wall=None):
         """Record an experiment event (thread-safe; never blocks)."""
+        if self.closed:
+            return
         item = ('event', t_host if t_host is not None else time.monotonic(),
                 t_wall if t_wall is not None else time.time(), str(text))
         try:
@@ -128,8 +133,11 @@ class Hdf5Logger(FlystateSink):
                 self.file.flush()
 
     def close(self):
+        if self.closed:
+            return
+        self.closed = True
         self.queue.put(None)
-        self.thread.join(timeout=5)
+        self.thread.join(timeout=30)
         for name, ds in self.datasets.items():
             ds.resize((self.n_events if name.startswith('events/') else self.n,))
         self.file.close()

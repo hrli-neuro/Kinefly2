@@ -25,11 +25,14 @@ class VideoRecorder:
         self.sidecar = None
         self.n_written = 0
         self.n_dropped = 0
+        self.closed = False
         self.thread = threading.Thread(target=self._run, daemon=True,
                                        name='video-recorder')
         self.thread.start()
 
     def write(self, frame):
+        if self.closed:
+            return
         try:
             self.queue.put_nowait(frame)
         except queue.Full:
@@ -63,6 +66,9 @@ class VideoRecorder:
             self.n_written += 1
 
     def close(self):
+        if self.closed:
+            return
+        self.closed = True
         self.queue.put(None)
         self.thread.join(timeout=30)
         if self.writer is not None:

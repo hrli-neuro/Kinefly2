@@ -1,14 +1,5 @@
 name: bottom
 camera:
-  # Rig (FLIR/Spinnaker) example -- exposure guidance: at 90 fps use an exposure
-  # near the frame period (~9000 us) so each frame contains the blurred stroke
-  # ENVELOPE (its leading edge = stroke amplitude, what the edge tracker reads).
-  # A short exposure (~1000 us) freezes the wing at a random stroke phase instead.
-  #   kind: pyspin
-  #   serial: "12345678"
-  #   fps: 90
-  #   exposure_us: 9000
-  #   gain_db: 10
   kind: video
   path: /Users/haoruli/Desktop/260819_XHCS_XHCS_017_YAMV_cam1.mp4
   pace: false
@@ -53,20 +44,20 @@ tracker:
     axis:
       track: false
       pt1:
-        x: 175.0
-        y: 50.0
+        x: 175.23479865293484
+        y: 49.70140553958481
       pt2:
-        x: 175.0
-        y: 150.0
+        x: 175.1390196174616
+        y: 149.701357855869
     head:
       track: true
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 278.0
-        y: 164.0
+        x: 278.12556143826805
+        y: 163.80000358668622
       radius_outer: 29.546573405388315
-      radius_inner: 14.560219778561036
+      radius_inner: 11.40175425099138
       angle_hi: 1.0868771956632024
       angle_lo: -1.0868771956632024
     abdomen:
@@ -74,8 +65,8 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 202.0
-        y: 159.0
+        x: 202.13038662966574
+        y: 158.72721390391234
       radius_outer: 10.0
       radius_inner: 5.0
       angle_hi: 3.927
@@ -85,8 +76,8 @@ tracker:
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 237.0
-        y: 139.0
+        x: 237.14952574745985
+        y: 138.76074610307114
       radius_outer: 100.16985574512923
       radius_inner: 72.55714687158297
       angle_hi: -0.14032230725997774
@@ -96,8 +87,8 @@ tracker:
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 235.0
-        y: 185.0
+        x: 235.10546834481647
+        y: 184.7588085878524
       radius_outer: 120.56948204251356
       radius_inner: 72.55714687158297
       angle_hi: 0.9746390216541299
@@ -106,8 +97,8 @@ tracker:
       track: false
       subtract_bg: false
       center:
-        x: 50.0
-        y: 50.0
+        x: 50.23485825757962
+        y: 49.58168174524326
       radius1: 30.0
       radius2: 20.0
-      angle: 0.0
+      angle: 0.0009577905185621404

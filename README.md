@@ -99,18 +99,50 @@ setup). Unchecked, every left/right handle is fully independent — use this
 when the two wings need different scanning regions. The setting persists in
 the YAML (`gui.symmetric`).
 
-### 2.2 Real time on the rig (both cameras)
+### 2.2 Real time on the rig: leave it on, record on demand
 
 ```bash
 python -m kinefly2.apps.run_rig config/rig.yaml
 ```
 
-- one live window per camera (disable with `--no-gui` for max headroom),
-- merged fly state published as JSON on ZMQ `tcp://*:5556`,
-- everything logged to `logs/flystate_YYYYMMDD_HHMMSS.h5` (disable `--no-log`),
-- quit with `q` or the `exit` button.
+Kinefly2 is meant to stay on for hours (experiments and the intervals in
+between): the cameras and tracking never stop, the merged fly state is
+published continuously on ZMQ `tcp://*:5556`, and one live window per camera
+shows the overlays (`--no-gui` for max headroom; `q` or `exit` quits; a
+recording in progress is stopped cleanly on exit). Between recordings nothing
+is written to disk.
 
-Consume the live state from any language / any machine on the network:
+**Recordings** (HDF5 fly state + optional raw video + events) are sessions
+that your experiment script starts and stops over the command socket
+(`command_port` in rig.yaml, default 5558):
+
+```python
+from kinefly2.client import Kinefly2Client        # needs only pyzmq; file can be copied anywhere
+k = Kinefly2Client('localhost')                    # or the rig's IP
+with k.recording(fly_id='017', protocol='YAMV', notes='stripe fixation'):
+    k.event({'trial': 1, 'event': 'stim_on'})      # logged on the recording's clock
+    ...                                            # run the trial (later: drive the panels)
+    k.event({'trial': 1, 'event': 'stim_off'})
+# recording stops when the block ends (also on exceptions)
+k.status()                                         # recording?, per-camera fps/frames, last session
+k.snapshot()                                       # PNG of each camera's current frame
+```
+
+The same works from a terminal: `python -m kinefly2.apps.ctl start --fly 017 --protocol YAMV`,
+`... event '{"trial":1}'`, `... status`, `... stop`, `... --host <rig-ip> status`;
+and from the GUI: the `record` button toggles a recording (fields from the
+template), and a red **REC name m:ss** indicator shows in every camera window.
+
+Each recording gets its own folder named `{date}_{genotype}_{fly_id}_{protocol}`
+(section 2.3). The **experiment template** (`--exp`, default
+`experiments/default.yaml`) supplies the rig-wide defaults — `data_root`,
+`genotype`, video on/off and quality, `events_port` — and every `start`
+overrides fields (`fly_id`, `protocol`, `notes`, `record_video`, `genotype`).
+`--record-now --fly 017 --protocol YAMV` records from launch until exit
+(one-shot use without a script).
+
+Consume the live state from any language / any machine on the network
+(`k.states()` in the Python client does the same):
 
 ```python
 import zmq, json
@@ -123,18 +155,12 @@ while True:
     lmr = parts['left']['angles'][0] - parts['right']['angles'][0]  # L-R WSA (rad)
 ```
 
-### 2.3 Per-experiment recordings (open- or closed-loop)
+Long runs: a live camera that stops delivering frames is reconnected
+automatically (status shows `down`/`reconnects`/`last_frame_age_s`); each
+session is its own set of files, so a day of experiments is many small
+recordings rather than one giant one.
 
-Everything that changes between recordings lives in one experiment YAML
-(`experiments/default.yaml`: data root, genotype, fly id, protocol, notes,
-video on/off, event port) with command-line overrides for quick successive
-flies:
-
-```bash
-python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --fly 018
-python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --fly 019 --protocol OL_stripe --no-video
-python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --cameras bottom   # front camera off
-```
+### 2.3 Recording folders and events
 
 Each recording gets a folder named with the lab convention
 `{date}_{genotype}_{fly_id}_{protocol}` (suffix `_2`, `_3`… if it exists):
@@ -146,7 +172,7 @@ Each recording gets a folder named with the lab convention
   260819_XHCS_XHCS_017_YAMV_bottom_frames.csv frame_id/t_camera/t_host per video frame
   260819_XHCS_XHCS_017_YAMV_front.avi / _front_frames.csv
   260819_XHCS_XHCS_017_YAMV_events.jsonl      stimulus events as received
-  260819_XHCS_XHCS_017_YAMV_experiment.yaml   resolved settings after overrides
+  260819_XHCS_XHCS_017_YAMV_experiment.yaml   resolved settings
   configs/                                    snapshot of rig.yaml + camera YAMLs used
 ```
 
@@ -155,20 +181,20 @@ trackers: `run_offline <folder>/configs/camera_bottom.yaml --video <folder>/<nam
 Video frame *k* corresponds to the sidecar row *k*, whose `frame_id` equals
 `/<camera>/seq` in the HDF5.
 
-**Stimulus events on the same clock.** Your arena/stimulus program can push
-any string (JSON recommended) to the recording; it is stamped on arrival with
-the fly-state clock (`t_host`) and wall-clock time (`t_wall`) and written to
-`/events` in the HDF5 and to the `.jsonl`:
+**Events on the same clock.** Besides `k.event(...)` (acknowledged), any
+program can push events fire-and-forget to the events port (`events_port` in
+the template, default 5557):
 
 ```python
 import zmq
 sock = zmq.Context().socket(zmq.PUSH)
-sock.connect('tcp://localhost:5557')             # events_port; rig IP from another machine
+sock.connect('tcp://localhost:5557')
 sock.send_string('{"trial": 12, "event": "closed_loop_start", "gain": 1.5}')
 ```
 
-Without `--exp` (or any experiment flag) `run_rig` behaves as before: an
-auto-named `flystate_<timestamp>.h5` in `rig.yaml`'s `log_dir`, no video.
+Events are stamped on arrival with the fly-state clock (`t_host`) and
+wall-clock time (`t_wall`) and written to `/events` in the HDF5 and to the
+`.jsonl`. Events arriving while no recording is active are counted and dropped.
 
 ### 2.4 Live browser dashboard
 
@@ -230,14 +256,14 @@ its own reference.
 
 | File | Contents |
 |---|---|
-| `config/rig.yaml` | Rig topology: camera list, primary camera, ZMQ port, log dir. |
+| `config/rig.yaml` | Rig topology: camera list, primary camera, ZMQ state port, command port. |
 | `config/camera_bottom.yaml` | Bottom view: `camera:` (capture settings) + `tracker:` (all tracking params, GUI-managed). |
 | `config/camera_front.yaml` | Same, for the front view. |
 | `config/background_<name>.png` | Per-camera background image, written by `saveBG` or `--make-bg`. |
 | `config/reference_<name>.png` | Per-camera reference frame for `autoplace` (saved with the params). |
 | `experiments/*.yaml` | Per-recording settings: data root, genotype/fly/protocol, notes, video on/off, event port (section 2.3). |
 | `kinefly2/gui/app.py` → `tracker_defaults()` | Defaults used for any tracker parameter missing from a camera YAML. |
-| `<data_root>/<date>/<name>/` | Recording folder (HDF5, videos, events, resolved settings, config snapshot). `logs/flystate_*.h5` only without `--exp`. |
+| `<data_root>/<date>/<name>/` | Recording folder (HDF5, videos, events, resolved settings, config snapshot). |
 | `tests/videos/*` | Auto-generated synthetic test fixtures — regenerated by the tests, don't tune configs here. |
 
 ### 3.1 `config/rig.yaml`
@@ -251,7 +277,7 @@ cameras:                      # name -> per-camera YAML (paths relative to this 
 primary: bottom               # this camera's updates drive the merged output
 use_gui: true
 zmq_port: 5556                # remove/comment to disable the publisher
-log_dir: ../logs              # remove/comment to disable HDF5 logging
+command_port: 5558            # command socket for experiment scripts (kinefly2.client)
 ```
 
 ### 3.2 `camera:` section of a camera YAML — capture settings
@@ -363,7 +389,9 @@ kinefly2/camera/     FrameSource abstraction: pyspin_source, video_source, openc
 kinefly2/core/       CameraPipeline (per-camera thread), StateMerger, flystate dataclasses
 kinefly2/output/     FlystateSink interface, ZMQ publisher, HDF5 logger; future panels driver
 kinefly2/gui/        TrackerView: per-camera window, toolbar, draggable handles, YAML save
-kinefly2/apps/       run_offline, run_rig, check_latency, dashboard
+kinefly2/apps/       run_offline, run_rig, ctl (command-line control), check_latency, dashboard
+kinefly2/client.py   Python client for experiment scripts (start/stop/event/status/states)
+kinefly2/core/session.py   recording sessions (attach/detach logger + video at runtime)
 kinefly2/gui/autoplace.py  automatic region placement (registration / silhouette)
 config/              rig.yaml + per-camera YAMLs + saved backgrounds/references
 experiments/         per-recording settings templates
@@ -379,6 +407,8 @@ tests/               synthetic-video generator + ground-truth and architecture t
       events on a shared clock, config snapshots), browser dashboard.
 - [x] Auto-placement of regions (`autoplace`), `rotation` tracker for small
       head-roll angles.
+- [x] Continuous operation with script-triggered recording sessions (command
+      socket + Python client + CLI + GUI record button), camera reconnect.
 - [ ] Live PySpin validation at 90 Hz on the rig (pending the Linux machine
       and FLIR cameras).
 - [ ] Reiser LED-panel closed-loop sink (pending the arena). Verify the

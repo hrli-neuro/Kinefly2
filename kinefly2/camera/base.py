@@ -21,6 +21,8 @@ class Frame:
 class FrameSource(ABC):
     """Blocking frame source. read() returns the next Frame, or None at end of stream."""
 
+    reconnectable = False   # Live cameras: None from read() means "reconnect", not EOF.
+
     @abstractmethod
     def open(self):
         ...

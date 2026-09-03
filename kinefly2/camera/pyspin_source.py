@@ -20,6 +20,8 @@ from .base import Frame, FrameSource
 
 
 class PySpinSource(FrameSource):
+    reconnectable = True
+
     def __init__(self, serial=None, fps=90.0, exposure_us=None, gain_db=None):
         self.serial = str(serial) if serial is not None else None
         self.fps = fps

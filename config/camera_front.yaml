@@ -1,28 +1,19 @@
 name: front
 camera:
-  # Rig (FLIR/Spinnaker) example -- exposure guidance: at 90 fps use an exposure
-  # near the frame period (~9000 us) so each frame contains the blurred stroke
-  # ENVELOPE (its leading edge = stroke amplitude, what the edge tracker reads).
-  # A short exposure (~1000 us) freezes the wing at a random stroke phase instead.
-  #   kind: pyspin
-  #   serial: "12345678"
-  #   fps: 90
-  #   exposure_us: 9000
-  #   gain_db: 10
   kind: video
   path: /Users/haoruli/Desktop/260819_XHCS_XHCS_017_YAMV_cam2.mp4
   pace: false
   loop: false
 tracker:
-  invertcolor: false   # Bright head on dark background; auto-detection guesses wrong on this view.
+  invertcolor: false
   scale_image: 1.0
   n_edges_max: 1
   rc_background: 1000.0
   wingbeat_min: 180
   wingbeat_max: 220
   head:
-    tracker: rotation    # Template rotation search: resolves small head-roll angles (~1 ms/frame).
-    search_deg: 8        # Half-range of the rotation search (deg).
+    tracker: rotation
+    search_deg: 8
     autozero: true
     threshold: 0.0
     feathering: 0.25
@@ -50,24 +41,24 @@ tracker:
     saturation_correction: true
   gui:
     windows: false
-    symmetric: false   # Left/right wing regions adjust independently in the GUI.
+    symmetric: false
     axis:
       track: false
       pt1:
-        x: 175.0
-        y: 50.0
+        x: 180.88476675748825
+        y: 52.002505749464035
       pt2:
-        x: 175.0
-        y: 150.0
+        x: 176.49070936441422
+        y: 151.90592238307
     head:
       track: true
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 130.0
-        y: 179.0
-      radius_outer: 70.0    # Annulus over the head texture (not the whole ball): r 30-70 px, +-50 deg
-      radius_inner: 30.0    # gave r=0.96 vs an independent roll estimate on the 260819 video.
+        x: 130.25989523530006
+        y: 178.9005873799324
+      radius_outer: 70.0
+      radius_inner: 30.0
       angle_hi: 0.8727
       angle_lo: -0.8727
     abdomen:
@@ -75,8 +66,8 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 80.0
-        y: 182.0
+        x: 80.17636519670486
+        y: 179.70066118240356
       radius_outer: 10.0
       radius_inner: 5.0
       angle_hi: 3.927
@@ -86,8 +77,8 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 73.55654736782802
-        y: 157.34164758519393
+        x: 74.82263802529008
+        y: 154.78299562770385
       radius_outer: 20.0
       radius_inner: 10.0
       angle_hi: -0.7854
@@ -97,8 +88,8 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 76.55116190422538
-        y: 207.25188985848268
+        x: 75.62127557164705
+        y: 204.7766179902603
       radius_outer: 20.0
       radius_inner: 10.0
       angle_hi: 2.3562
@@ -107,8 +98,8 @@ tracker:
       track: false
       subtract_bg: false
       center:
-        x: 50.0
-        y: 50.0
+        x: 56.005495965480804
+        y: 46.50993400812149
       radius1: 30.0
       radius2: 20.0
-      angle: 0.0
+      angle: 0.04395472524721401

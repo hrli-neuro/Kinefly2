@@ -8,6 +8,8 @@ from .base import Frame, FrameSource
 
 
 class OpenCVSource(FrameSource):
+    reconnectable = True
+
     def __init__(self, index=0, fps=None):
         self.index = index
         self.fps = fps

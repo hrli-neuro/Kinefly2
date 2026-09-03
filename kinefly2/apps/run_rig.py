@@ -1,19 +1,22 @@
-"""Real-time multi-camera tracking with merged state output.
+"""Continuous real-time tracking with script-triggered recordings.
 
-One pipeline thread per camera; the GUI (imshow/waitKey) stays in the main
-thread. The merged fly state is published over ZMQ and logged to HDF5.
-The primary camera (bottom view) drives the output loop; the future LED-panel
-closed-loop driver attaches as another sink.
+Kinefly2 stays on for hours: one pipeline thread per camera keeps tracking,
+the merged fly state is published over ZMQ, the GUI shows live overlays. A
+**recording** (HDF5 fly state + optional raw video + events) is a session
+that experiment scripts start and stop over the command socket -- see
+kinefly2.client -- or the GUI `record` button, or the CLI (apps/ctl.py):
 
-Per-experiment settings (recording name, data folder, video on/off, event
-port) come from an experiment YAML plus command-line overrides:
+    python -m kinefly2.apps.run_rig config/rig.yaml                      # cameras on, idle
+    python -m kinefly2.apps.ctl start --fly 017 --protocol YAMV          # from any terminal/script
+    python -m kinefly2.apps.ctl stop
 
-    python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --fly 018
-    python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/default.yaml --no-video
-    python -m kinefly2.apps.run_rig config/rig.yaml --cameras bottom      # front camera off
+The experiment template (`--exp`, default experiments/default.yaml if it
+exists) supplies data_root, genotype, video/quality/event settings; each
+recording overrides fields (fly id, protocol, notes, video on/off).
 
-Without --exp (or any experiment flag) the legacy behavior applies: an
-auto-named flystate_<timestamp>.h5 in rig.yaml's log_dir, no video.
+    python -m kinefly2.apps.run_rig config/rig.yaml --cameras bottom     # front camera off
+    python -m kinefly2.apps.run_rig config/rig.yaml --record-now --fly 017 --protocol YAMV
+                                                                          # one-shot: record from start to exit
 """
 import argparse
 import os
@@ -27,11 +30,14 @@ from ..camera.base import make_source
 from ..core.experiment import Experiment
 from ..core.merger import StateMerger
 from ..core.pipeline import CameraPipeline
+from ..core.session import RecordingSession
 from ..gui.app import TrackerView
+from ..output.command_server import CommandServer
 from ..output.event_receiver import EventReceiver
-from ..output.logger import Hdf5Logger
-from ..output.video_recorder import VideoRecorder
 from ..output.zmq_pub import ZmqPublisher
+
+DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), 'experiments', 'default.yaml')
 
 
 def parse_cameras(rig, rig_dir, only=None):
@@ -58,24 +64,23 @@ def parse_cameras(rig, rig_dir, only=None):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('rig_config', help='rig.yaml naming the cameras and outputs')
+    ap.add_argument('rig_config', help='rig.yaml naming the cameras and ports')
     ap.add_argument('--cameras', nargs='+', metavar='NAME',
                     help='Use only these cameras (e.g. --cameras bottom)')
     ap.add_argument('--no-gui', action='store_true')
-    ap.add_argument('--no-log', action='store_true', help='Disable the HDF5 fly-state log')
-    g = ap.add_argument_group('experiment (per-recording settings)')
-    g.add_argument('--exp', metavar='YAML', help='Experiment YAML (see experiments/default.yaml)')
-    g.add_argument('--fly', dest='fly_id', help='Fly id, e.g. 017')
-    g.add_argument('--genotype')
-    g.add_argument('--protocol', help='Stimulus / open-loop / closed-loop protocol name')
-    g.add_argument('--notes')
-    g.add_argument('--date', help='YYMMDD (default: today)')
+    ap.add_argument('--no-commands', action='store_true', help='Disable the command socket')
+    g = ap.add_argument_group('experiment template (defaults for recordings)')
+    g.add_argument('--exp', metavar='YAML', help='Experiment template (default: experiments/default.yaml)')
     g.add_argument('--data-root', dest='data_root')
-    g.add_argument('--video', dest='record_video', action='store_true', default=None,
-                   help='Record raw MJPEG video per camera')
-    g.add_argument('--no-video', dest='record_video', action='store_false',
-                   help='Do not record video for this recording')
+    g.add_argument('--genotype')
     g.add_argument('--events-port', dest='events_port', type=int)
+    g.add_argument('--video', dest='record_video', action='store_true', default=None)
+    g.add_argument('--no-video', dest='record_video', action='store_false')
+    r = ap.add_argument_group('one-shot recording (record from start until exit)')
+    r.add_argument('--record-now', action='store_true')
+    r.add_argument('--fly', dest='fly_id')
+    r.add_argument('--protocol')
+    r.add_argument('--notes')
     args = ap.parse_args()
 
     with open(args.rig_config) as f:
@@ -90,70 +95,69 @@ def main():
         print('Primary camera not enabled; using %s as primary.' % primary)
     use_gui = not args.no_gui and rig.get('use_gui', True)
 
-    overrides = {k: getattr(args, k) for k in Experiment.FIELDS if hasattr(args, k)}
-    experiment_mode = args.exp is not None or any(v is not None for v in overrides.values())
+    # Experiment template: rig-wide defaults for recordings.
+    exp_path = args.exp or (DEFAULT_TEMPLATE if os.path.exists(DEFAULT_TEMPLATE) else None)
+    template = Experiment.load(exp_path, {'data_root': args.data_root, 'genotype': args.genotype,
+                                          'events_port': args.events_port,
+                                          'record_video': args.record_video})
 
     merger = StateMerger(primary=primary)
     if rig.get('zmq_port'):
         merger.add_sink(ZmqPublisher(port=int(rig['zmq_port'])))
 
-    logger = recorders = events = None
-    exp = None
-    recorders = {}
-    if experiment_mode:
-        exp = Experiment.load(args.exp, overrides)
-        exp.make_output_dir()
-        exp.snapshot_configs([args.rig_config, args.exp] + list(cameras.values()))
-        exp.write_resolved()
-        print('Recording: %s\n  -> %s' % (exp.run_name, exp.output_dir))
-        if exp.log_flystate and not args.no_log:
-            logger = Hdf5Logger(exp.path('_flystate.h5'), cameras=list(cameras))
-            merger.add_sink(logger)
-        if exp.events_port:
-            events = EventReceiver(exp.events_port, logger=logger,
-                                   jsonl_path=exp.path('_events.jsonl'))
-            print('  events: ZMQ PULL on port %d' % exp.events_port)
-    elif not args.no_log and rig.get('log_dir'):
-        log_dir = os.path.join(rig_dir, rig['log_dir'])
-        os.makedirs(log_dir, exist_ok=True)
-        path = os.path.join(log_dir, time.strftime('flystate_%Y%m%d_%H%M%S.h5'))
-        logger = Hdf5Logger(path, cameras=list(cameras))
-        merger.add_sink(logger)
-        print('Logging to %s' % path)
-
-    views = {}
-    pipelines = []
+    views, pipelines = {}, {}
     for name, cfg_path in cameras.items():
         view = TrackerView(name, cfg_path, use_gui=use_gui)
         with open(cfg_path) as f:
             cam_cfg = (yaml.safe_load(f) or {}).get('camera') or {}
         source = make_source(cam_cfg)
         source.open()
-        recorder = None
-        if exp is not None and exp.record_video:
-            fps = getattr(source, 'fps', None) or cam_cfg.get('fps') or 30.0
-            recorder = VideoRecorder(exp.path('_%s.avi' % name), fps=fps,
-                                     quality=exp.video_quality,
-                                     sidecar_path=exp.path('_%s_frames.csv' % name))
-            recorders[name] = recorder
         views[name] = view
-        pipelines.append(CameraPipeline(view, source, merger, render=use_gui,
-                                        recorder=recorder))
-    if recorders:
-        print('  video: %s' % ', '.join(os.path.basename(r.path) for r in recorders.values()))
+        pipelines[name] = CameraPipeline(view, source, merger, render=use_gui)
 
-    for p in pipelines:
+    events = EventReceiver(template.events_port) if template.events_port else None
+    session = RecordingSession(template, merger, pipelines, views=views, events=events,
+                               config_paths=[args.rig_config, exp_path] + list(cameras.values()))
+    commands = None
+    if not args.no_commands and rig.get('command_port', 5558):
+        commands = CommandServer(session.handle_command, port=int(rig.get('command_port', 5558)))
+
+    def toggle_record():
+        try:
+            if session.recording:
+                session.stop()
+            else:
+                session.start()
+        except Exception as e:
+            print('record: %s' % e)
+    for view in views.values():
+        view.on_record = toggle_record
+
+    print('Kinefly2 up: cameras %s, primary %s' % (', '.join(cameras), primary))
+    if rig.get('zmq_port'):
+        print('  fly state: ZMQ PUB tcp://*:%s' % rig['zmq_port'])
+    if commands is not None:
+        print('  commands:  ZMQ REP tcp://*:%d  (kinefly2.client / apps/ctl.py)' % commands.port)
+    if events is not None:
+        print('  events:    ZMQ PULL tcp://*:%d' % events.port)
+    print('  recordings -> %s  (template %s)' % (os.path.expanduser(template.data_root), exp_path))
+
+    for p in pipelines.values():
         p.start()
-    t_start = time.monotonic()
+    if args.record_now:
+        session.start(fly_id=args.fly_id, protocol=args.protocol, notes=args.notes)
 
     try:
         while True:
-            if any(p.eof or p.error for p in pipelines):
+            if any(p.eof or p.error for p in pipelines.values()):
                 break
             if any(v.bQuit for v in views.values()):
                 break
+            rec = session.status().get('session') if session.recording else None
+            for v in views.values():
+                v.rec_status = rec
             if use_gui:
-                for p in pipelines:
+                for p in pipelines.values():
                     img = p.latest_display()
                     if img is not None:
                         cv2.imshow(p.view.window_name, img)
@@ -161,36 +165,35 @@ def main():
                     break
             else:
                 time.sleep(0.5)
-                print('  '.join('%s: %d frames' % (p.view.name, p.n_frames)
-                                for p in pipelines), end='\r')
+                line = '  '.join('%s: %d' % (n, p.n_frames) for n, p in pipelines.items())
+                if rec:
+                    line += '   REC %s %.0fs' % (rec['name'], rec['duration'])
+                print(line, end='\r')
     except KeyboardInterrupt:
         pass
     finally:
-        for p in pipelines:
-            p.stop()
-        for p in pipelines:
-            p.source.close()
+        print()
+        try:
+            session.close()             # Stops an active recording cleanly.
+        except Exception as e:
+            print('stop recording: %s' % e)
+        if commands is not None:
+            commands.close()
         if events is not None:
             events.close()
-        for r in recorders.values():
-            r.close()
+        for p in pipelines.values():
+            p.stop()
+        for p in pipelines.values():
+            p.source.close()
         merger.close()
         cv2.destroyAllWindows()
 
-    dur = time.monotonic() - t_start
-    print('\nDone: %.1f s' % dur)
-    for p in pipelines:
-        line = '  %s: %d frames tracked' % (p.view.name, p.n_frames)
-        r = recorders.get(p.view.name)
-        if r is not None:
-            line += ', %d video frames written' % r.n_written
-            if r.n_dropped:
-                line += ', %d DROPPED (disk too slow)' % r.n_dropped
-        print(line)
-    if logger is not None:
-        print('  fly state: %d rows, %d events -> %s' % (logger.n, logger.n_events, logger.path))
-    if exp is not None:
-        print('  folder: %s' % exp.output_dir)
+    for n, p in pipelines.items():
+        print('  %s: %d frames tracked, %d reconnects' % (n, p.n_frames, p.n_reconnects))
+    if session.last_summary:
+        s = session.last_summary
+        print('  last recording: %s  %.1f s, %d rows, %d events -> %s' % (
+            s['name'], s['duration'], s['rows'], s['events'], s['output_dir']))
 
 
 if __name__ == '__main__':

@@ -121,6 +121,8 @@ class TrackerView:
         self.scale = self.params['scale_image']
         self.paramsStartup = copy.deepcopy(self.params)   # 'reset' target
         self.paramsUndo = None                             # params before the last autoplace
+        self.on_record = None      # Callback for the 'record' button (set by run_rig).
+        self.rec_status = None     # Dict from RecordingSession.status()['session'] while recording.
 
         self.bMousing = False
         self.bValidImage = False
@@ -328,6 +330,18 @@ class TrackerView:
                             s += '% 7.4f' % part.state.angles[0]
                         cv2.putText(imgOutput, s, (x, y), self.fontface, self.scaleText, part.bgra)
 
+            rec = self.rec_status
+            if rec is not None:
+                yR = self.yToolbar + int(14 * self.scale)
+                cv2.circle(imgOutput, (int(12 * self.scale), yR), max(3, int(5 * self.scale)),
+                           (0, 0, 255), -1)
+                dropped = sum(v.get('dropped', 0) for v in rec.get('video', {}).values())
+                s = 'REC %s  %d:%02d' % (rec.get('name', ''), int(rec.get('duration', 0)) // 60,
+                                       int(rec.get('duration', 0)) % 60)
+                if dropped:
+                    s += '  DROPPED %d' % dropped
+                cv2.putText(imgOutput, s, (int(22 * self.scale), yR + int(4 * self.scale)),
+                            self.fontface, self.scaleText, (0, 0, 255))
             if self.ibtnInvertColor is not None:
                 self.buttons[self.ibtnInvertColor].state = self.fly.bInvertColor
             for btn in self.buttons or []:
@@ -361,6 +375,7 @@ class TrackerView:
         add(type='pushbutton', name='save_bg', text='saveBG')
         add(type='pushbutton', name='autoplace', text='autoplace')
         add(type='pushbutton', name='reset', text='reset')
+        add(type='pushbutton', name='record', text='record')
         add(type='static', name='track', text='track:',
             sides=ui.SIDE_LEFT | ui.SIDE_TOP | ui.SIDE_BOTTOM)
         for partname, label in (('head', 'H'), ('abdomen', 'A'), ('left', 'L'),
@@ -716,6 +731,9 @@ class TrackerView:
                     self.autoplace()
                 elif self.nameSelected == self.nameSelectedNow == 'reset':
                     self.reset_params()
+                elif self.nameSelected == self.nameSelectedNow == 'record':
+                    if self.on_record is not None:
+                        self.on_record()
 
             elif self.uiSelected == 'checkbox':
                 if self.nameSelected == self.nameSelectedNow:

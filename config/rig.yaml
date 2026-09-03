@@ -10,7 +10,9 @@ cameras:
 primary: bottom                # This camera's updates drive the merged output.
 use_gui: true
 zmq_port: 5556                 # Merged fly state published as JSON on tcp://*:5556.
-log_dir: ../logs               # HDF5 fly-state logs (created if missing).
+command_port: 5558             # Command socket: experiment scripts start/stop recordings (kinefly2.client).
+# Recording settings (data root, video, events port) live in the experiment
+# template passed as `run_rig --exp experiments/default.yaml` (default if present).
 
 # --- Future LED-panel closed-loop output (arena not set up yet) -------------
 # panels:
