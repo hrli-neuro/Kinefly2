@@ -444,6 +444,8 @@ class TrackerView:
                         s = label + ':'
                         if len(part.state.angles) > 0:
                             s += '% 6.1f deg' % np.degrees(part.state.angles[0])
+                        if hasattr(part, 'status_text'):
+                            s += part.status_text()   # landmarks: matched count + quality
                         cv2.putText(imgOutput, s, (x, y), self.fontface, self.scaleText, part.bgra)
 
             rec = self.rec_status

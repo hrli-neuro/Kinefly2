@@ -264,7 +264,12 @@ Outputs: `angles = [roll]` (radians), `radii = [dx, dy]` (raw head shift, px),
 removed, px; fit residual, px), plus match quality. Logged as
 `front/head_angle` (roll), `head_dx`, `head_dy`, `head_dx_corr`,
 `head_dy_corr`, `head_fit_residual`, `head_score`. The dashboard shows the
-roll trace and a "Head translation (front)" trace in pixels.
+roll trace and a "Head translation (front)" trace in pixels. In the camera
+window the readout sits with the other parts in the bottom-left corner:
+`HEAD:  +2.4 deg  5/5  q0.88` — the roll in degrees, how many landmarks
+matched this frame, and `q`, the mean template match score (normalized
+cross-correlation, 0–1; landmarks scoring below `min_score` are dropped).
+`NON-RIGID x px` is appended when the landmarks stop moving as one body.
 Parameters (`tracker: head:`): `template_px`, `search_px`, `min_score`,
 `fit: rigid|similarity`, `rotate_templates`, `smooth`. Cost ≈ 0.3–0.6 ms.
 Focus and magnification of the front camera matter more than frame rate.

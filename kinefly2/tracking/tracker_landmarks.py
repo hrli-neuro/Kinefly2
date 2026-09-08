@@ -352,6 +352,18 @@ class LandmarkTracker(object):
 
     # ------------------------------------------------------------- drawing
 
+    def status_text(self):
+        """Short quality summary for the GUI status stack: how many landmarks
+        matched this frame, the mean match score, and a warning when they stop
+        moving as one rigid body."""
+        if not len(self.ok):
+            return ''
+        s = '  %d/%d  q%.2f' % (int(self.ok.sum()), len(self.ok), self.state.intensity)
+        if len(self.state.gradients) > 2 and np.isfinite(self.state.gradients[2]) \
+                and self.state.gradients[2] > self.nonrigid_px:
+            s += '  NON-RIGID %.1fpx' % self.state.gradients[2]
+        return s
+
     def draw(self, image):
         g = self.params['gui'][self.name]
         self.handles['hinge'].draw(image)
@@ -379,17 +391,8 @@ class LandmarkTracker(object):
                      (int(c[0] + ax[0]), int(c[1] + ax[1])), self.bgra, 1)
             cv2.arrowedLine(image, (int(self.ref_pts.mean(0)[0]), int(self.ref_pts.mean(0)[1])),
                             (int(c[0]), int(c[1])), (0, 200, 255), 1, tipLength=0.3)
-            txt = 'roll %+.1f deg  shift (%+.1f,%+.1f) px  %d/%d  q%.2f' % (
-                np.degrees(self.state.angles[0]),
-                self.state.gradients[0], self.state.gradients[1],
-                int(self.ok.sum()), len(self.ok), self.state.intensity)
-            if len(self.state.gradients) > 2 and self.state.gradients[2] > self.nonrigid_px:
-                txt += '  NON-RIGID %.1fpx' % self.state.gradients[2]   # landmarks not moving together
-            # Keep the readout inside the frame (the head is often near an edge).
-            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_DUPLEX, 0.4, 1)
-            tx = int(min(max(4, c[0] + 8), image.shape[1] - tw - 4))
-            ty = int(min(max(th + 4, c[1] - 8), image.shape[0] - 4))
-            cv2.putText(image, txt, (tx, ty), cv2.FONT_HERSHEY_DUPLEX, 0.4, self.bgra)
+            # The numeric readout (roll, landmarks matched, quality) is drawn with
+            # the other parts' values in the bottom-left corner, by gui/app.py.
         elif len(self.ref_pts) < 2:
             cv2.putText(image, 'landmarks: place 2+ points (+lm)',
                         (int(self.ptHinge_i[0]) + 8, int(self.ptHinge_i[1]) - 8),
