@@ -135,7 +135,12 @@ def test_recording_pipeline_and_events():
     assert [int(r['frame_id']) for r in rows] == list(range(300))
 
     with h5py.File(exp.path('_flystate.h5')) as f:
-        assert 'bottom/head_dx_corr' in f and 'bottom/head_yaw' not in f, list(f['bottom'])
+        assert 'bottom/head_dx_corr' in f, list(f['bottom'])
+        # yaw/pitch angles exist but stay NaN until lever_px is calibrated:
+        # the displacement channels are the data, an angle would be a guess.
+        for col in ('head_yaw', 'head_pitch'):
+            assert col in f['bottom'], list(f['bottom'])
+            assert not np.isfinite(f['bottom/%s' % col][:]).any(), col
         seq = f['bottom/seq'][:]
         assert len(seq) == 300 and seq[0] == 0 and seq[-1] == 299
         assert np.isfinite(f['merged/t_wall'][:]).all()

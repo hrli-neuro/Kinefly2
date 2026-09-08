@@ -393,6 +393,23 @@ class TrackerView:
 
     # ---------------------------------------------------------------- drawing
 
+    def wrap_text(self, s, max_width):
+        """Break a status line at its double-space field separators so it fits
+        the frame. Fields are kept whole; an over-long field is left alone."""
+        fields = [f for f in s.split('  ') if f]
+        lines, cur = [], ''
+        for f in fields:
+            trial = (cur + '  ' + f) if cur else f
+            w = cv2.getTextSize(trial, self.fontface, self.scaleText, 1)[0][0]
+            if cur and w > max_width:
+                lines.append(cur)
+                cur = '    ' + f          # indent continuations
+            else:
+                cur = trial
+        if cur:
+            lines.append(cur)
+        return lines or ['']
+
     def render(self):
         """Draw the tracking overlay; returns the annotated BGR image."""
         with self.lock:
@@ -440,13 +457,19 @@ class TrackerView:
                                         ('abdomen', 'ABDOMEN'), ('head', 'HEAD')):
                     if self.params['gui'][partname]['track']:
                         part = getattr(self.fly, partname)
-                        y -= h_text + self.h_gap
                         s = label + ':'
                         if len(part.state.angles) > 0:
                             s += '% 6.1f deg' % np.degrees(part.state.angles[0])
                         if hasattr(part, 'status_text'):
-                            s += part.status_text()   # landmarks: matched count + quality
-                        cv2.putText(imgOutput, s, (x, y), self.fontface, self.scaleText, part.bgra)
+                            s += part.status_text()   # landmarks: quality + warnings
+                        # The landmark readout carries warnings worth reading, so
+                        # wrap it onto extra lines rather than let it run off the
+                        # right edge of the frame.
+                        lines = self.wrap_text(s, imgOutput.shape[1] - x - 4)
+                        for line in reversed(lines):
+                            y -= h_text + self.h_gap
+                            cv2.putText(imgOutput, line, (x, y), self.fontface,
+                                        self.scaleText, part.bgra)
 
             rec = self.rec_status
             if rec is not None:

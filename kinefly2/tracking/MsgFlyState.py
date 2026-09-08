@@ -15,6 +15,8 @@ class MsgState:
         self.radii          = []
         self.freq           = []
         self.intensity      = []
+        self.kind           = None   # Tracker type, when consumers need to know.
+        self.extra          = {}     # Tracker-specific named channels.
 
 class Header:
     def __init__(self, seq=0, stamp=0.0, frame_id=''):

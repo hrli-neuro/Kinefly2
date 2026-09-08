@@ -12,14 +12,22 @@ positions onto the measured ones decomposes the head motion:
                               where the hinge is placed)
     translation of the fit -> the head's DISPLACEMENT in pixels, after removing
                               the centroid shift that a roll about the neck
-                              hinge produces. From the front this is mostly
-                              yaw, but it is deliberately NOT converted to a
-                              yaw angle: that lever arm is the head's
-                              anterior-posterior depth from the yaw axis, which
-                              points along the optical axis and cannot be
-                              measured in a frontal view. Calibrate the pixels
-                              offline (e.g. against the bottom camera's head
-                              yaw) if an absolute angle is needed.
+                              hinge produces.
+
+From a frontal view the two displacement components are the remaining two head
+rotations, each seen end-on:
+
+    horizontal (dx_corr) -> YAW   (rotation about the dorsoventral axis)
+    vertical   (dy_corr) -> PITCH (rotation about the lateral axis)
+
+Both scale by the SAME lever arm: the head's anterior-posterior depth from the
+neck joint. That depth points along the optical axis, so a frontal view cannot
+measure it and these stay in PIXELS, uncalibrated. One constant converts both:
+fit it post hoc against the bottom camera's head yaw angle (which is a true
+in-plane rotation there, so it needs no lever arm) with
+kinefly2.analysis.calibrate. Set it as `lever_px` in the head's config section
+and the yaw/pitch angles appear in the log and the GUI; leave it unset and they
+are NaN rather than a guess.
 
 Unlike the hinge-based trackers (edge/area/rotation) this needs no rotation
 center and is not corrupted by combined roll+yaw. Blob-like features also
@@ -31,10 +39,12 @@ Outputs (like the other trackers: angles in radians; the GUI displays degrees):
     state.gradients = [dx_corr, dy_corr, residual]  roll-removed shift, px; fit residual, px
     state.intensity = mean match score              0..1 quality
     state.kind      = 'landmarks'
+    state.extra     = {roll_sigma, n_ok, worst_lm, warnings, yaw, pitch}
 Per-part parameters (tracker: section): template_px, search_px, min_score,
 fit ('rigid'|'similarity'), rotate_templates, smooth, nonrigid_px (residual
 above which the overlay warns that the landmarks do not move as one body:
-landmarks on specular highlights, legs, or the proboscis, or a mismatch).
+landmarks on specular highlights, legs, or the proboscis, or a mismatch),
+lever_px (optional; see above).
 Geometry (gui.<part>): hinge (neck pivot), landmarks: [{x, y}, ...].
 """
 import os
@@ -60,6 +70,52 @@ def rigid_fit(P, Q, similarity=False):
     scale = float((S * np.diag(D)).sum() / max(1e-9, (P0 ** 2).sum())) if similarity else 1.0
     resid = np.linalg.norm(Q0 - (scale * (R @ P0.T)).T, axis=1)
     return theta, scale, Qc - Pc, resid
+
+
+def layout_metrics(pts):
+    """Properties of a landmark layout that decide what it can measure.
+
+    rms_radius  spread about the centroid; roll precision scales with it.
+    min_dist    closest pair; bounds how far the matcher may search (below).
+    ambiguity   how well the pattern maps onto itself when rotated. A layout
+                that reproduces itself under a rotation cannot be told apart
+                from that rotation, so the fit flips between the two.
+    """
+    P = np.asarray(pts, dtype=float).reshape(-1, 2)
+    n = len(P)
+    if n < 2:
+        return {'n': n, 'rms_radius': 0.0, 'min_dist': np.inf, 'ambiguity': np.inf}
+    d = np.linalg.norm(P[:, None, :] - P[None, :, :], axis=2)
+    min_dist = float(d[~np.eye(n, dtype=bool)].min())
+    c = P.mean(0)
+    rms = float(np.sqrt((np.linalg.norm(P - c, axis=1) ** 2).mean()))
+    amb = np.inf
+    for deg in (180.0, 90.0, -90.0):
+        a = np.radians(deg)
+        R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+        Pr = (R @ (P - c).T).T + c
+        # Worst case over points: how far the rotated pattern sits from the
+        # original. Small = the rotation reproduces the layout = ambiguous.
+        amb = min(amb, float(np.linalg.norm(Pr[:, None, :] - P[None, :, :],
+                                            axis=2).min(1).max()))
+    return {'n': n, 'rms_radius': rms, 'min_dist': min_dist, 'ambiguity': amb}
+
+
+def safe_search_px(min_dist, template_px):
+    """Largest search radius that cannot reach a neighbouring landmark.
+
+    matchTemplate scans out to search_px + template_px//2 from the predicted
+    position. Once that reaches the next landmark, a point can lock onto its
+    neighbour's feature; on a near-symmetric layout the whole set swaps at once
+    and the fit reports a spurious rotation while staying perfectly rigid, so
+    the residual check cannot see it. Measured case: 4 landmarks 30.0 px apart
+    with search_px 20 and template_px 25 reached 32 px and flipped the roll
+    past 170 deg in 2.5% of frames; clamping the reach removed all of them.
+    The 0.9 factor leaves room for the prediction itself being slightly off.
+    """
+    if not np.isfinite(min_dist):
+        return None
+    return max(2, int(0.9 * min_dist) - template_px // 2)
 
 
 def match_landmarks(image, templates, predicted, search_px, margin):
@@ -133,6 +189,10 @@ class LandmarkTracker(object):
         self.scores = np.zeros(0)
         self.ok = np.zeros(0, dtype=bool)
         self.roll_s = None
+        self.layout = {'n': 0, 'rms_radius': 0.0, 'min_dist': np.inf, 'ambiguity': np.inf}
+        self.warnings = []                     # layout problems, shown in the GUI
+        self.lever_px = None                   # set once yaw/pitch are calibrated
+        self.resid_ema = None                  # per-landmark running residual
         self.set_params(params)
 
     # ------------------------------------------------------------ geometry
@@ -152,8 +212,22 @@ class LandmarkTracker(object):
         self.rotate_templates = bool(t.get('rotate_templates', True))
         self.smooth = float(t.get('smooth', 0.0))
         self.nonrigid_px = float(t.get('nonrigid_px', 2.0))   # residual above this = warn
+        lever = t.get('lever_px', None)                        # None until calibrated
+        self.lever_px = float(lever) if lever else None
         self.ptHinge_i = np.array([g['hinge']['x'], g['hinge']['y']], dtype=float)
         pts = np.array(self.landmarks(), dtype=float).reshape(-1, 2)
+        # Check the layout before trusting it, and never let the matcher search
+        # far enough to reach a neighbouring landmark.
+        self.layout = layout_metrics(pts)
+        self.warnings = []
+        safe = safe_search_px(self.layout['min_dist'], self.template_px)
+        if safe is not None and self.search_px > safe:
+            self.warnings.append('search %d->%d' % (self.search_px, safe))
+            self.search_px = safe
+        if len(pts) >= 2 and self.layout['ambiguity'] < 0.25 * self.layout['rms_radius']:
+            self.warnings.append('AMBIGUOUS LAYOUT')
+        if 0 < len(pts) < 4:
+            self.warnings.append('only %d landmarks' % len(pts))
         # Keep templates only if the landmarks did not move.
         if self.template_pts is None or len(self.template_pts) != len(pts) or \
                 (len(pts) and np.abs(self.template_pts - pts).max() > 0.5):
@@ -300,7 +374,11 @@ class LandmarkTracker(object):
                 idx = np.where(ok)[0][~keep]
                 ok[idx] = False
                 theta, scale, dc, resid = rigid_fit(self.ref_pts[ok], pos[ok], self.similarity)
-        return (theta, scale, dc, float(resid.mean())), pos, scores, ok
+        # Spread the residuals back over all landmarks (NaN where unmatched) so
+        # a single persistently bad point can be identified, not just the mean.
+        full = np.full(len(self.ref_pts), np.nan)
+        full[ok] = resid
+        return (theta, scale, dc, float(resid.mean()), full), pos, scores, ok
 
     def update(self, dt, image, bInvertColor):
         self.iCount += 1
@@ -327,9 +405,10 @@ class LandmarkTracker(object):
             self.state.radii = [np.nan, np.nan]
             self.state.gradients = [np.nan, np.nan, np.nan]
             self.state.kind = 'landmarks'
+            self.state.extra = self._extra(np.nan, 0, np.nan, np.nan)
             self.state.intensity = float(scores[np.isfinite(scores)].mean()) if np.isfinite(scores).any() else 0.0
             return
-        theta, scale, dc, resid = fit
+        theta, scale, dc, resid, resid_full = fit
         self.last_fit = (theta, scale, dc)
         roll = self.sense * theta
         # The head rolls about the neck (hinge), so a roll by itself displaces
@@ -349,6 +428,50 @@ class LandmarkTracker(object):
         self.state.gradients = [float(dc_corr[0]), float(dc_corr[1]), resid]
         self.state.intensity = float(scores[ok].mean())
         self.state.kind = 'landmarks'
+        # Roll precision: a point localised to `resid` pixels, `rms_radius`
+        # away from the centre of rotation, pins the angle to resid/radius;
+        # averaging over the matched landmarks tightens it by sqrt(N).
+        rms = self.layout['rms_radius']
+        n_ok = int(ok.sum())
+        sigma = resid / (rms * np.sqrt(n_ok)) if rms > 0 and n_ok else np.nan
+        self._track_worst(resid_full)
+        self.state.extra = self._extra(sigma, n_ok, dc_corr[0], dc_corr[1])
+
+    def _track_worst(self, resid_full):
+        """Running per-landmark residual, so a single point that is quietly
+        wrong (on a specular highlight, a leg, the proboscis) can be named.
+        The mean residual hides it; this does not."""
+        if resid_full is None or not len(resid_full):
+            return
+        if self.resid_ema is None or len(self.resid_ema) != len(resid_full):
+            self.resid_ema = np.full(len(resid_full), np.nan)
+        m = np.isfinite(resid_full)
+        fresh = ~np.isfinite(self.resid_ema) & m
+        self.resid_ema[fresh] = resid_full[fresh]
+        upd = m & ~fresh
+        self.resid_ema[upd] = 0.99 * self.resid_ema[upd] + 0.01 * resid_full[upd]
+
+    def worst_landmark(self):
+        """Index of the landmark that fits worst over time, or None."""
+        if self.resid_ema is None or not np.isfinite(self.resid_ema).any():
+            return None
+        k = int(np.nanargmax(self.resid_ema))
+        # Only call it out when it stands clearly apart from the others.
+        others = np.delete(self.resid_ema, k)
+        if not np.isfinite(others).any() or self.resid_ema[k] < 2.0 * np.nanmedian(others):
+            return None
+        return k
+
+    def _extra(self, roll_sigma, n_ok, dx_corr, dy_corr):
+        """Auxiliary channels: precision, layout health, and — only once
+        `lever_px` has been calibrated — yaw and pitch as real angles."""
+        yaw = pitch = np.nan
+        if self.lever_px:
+            yaw = float(np.arcsin(np.clip(dx_corr / self.lever_px, -1.0, 1.0)))
+            pitch = float(np.arcsin(np.clip(dy_corr / self.lever_px, -1.0, 1.0)))
+        return {'roll_sigma': float(roll_sigma), 'n_ok': int(n_ok),
+                'worst_lm': self.worst_landmark(), 'warnings': list(self.warnings),
+                'yaw': yaw, 'pitch': pitch}
 
     # ------------------------------------------------------------- drawing
 
@@ -358,10 +481,26 @@ class LandmarkTracker(object):
         moving as one rigid body."""
         if not len(self.ok):
             return ''
-        s = '  %d/%d  q%.2f' % (int(self.ok.sum()), len(self.ok), self.state.intensity)
-        if len(self.state.gradients) > 2 and np.isfinite(self.state.gradients[2]) \
-                and self.state.gradients[2] > self.nonrigid_px:
-            s += '  NON-RIGID %.1fpx' % self.state.gradients[2]
+        g = self.state.gradients
+        x = getattr(self.state, 'extra', None) or {}
+        s = ''
+        sigma = x.get('roll_sigma', np.nan)
+        if np.isfinite(sigma):
+            s += ' +-%.1f' % np.degrees(sigma)
+        if len(g) > 2 and np.isfinite(g[0]):
+            if self.lever_px:
+                s += '  yaw% 5.1f pitch% 5.1f deg' % (np.degrees(x.get('yaw', np.nan)),
+                                                      np.degrees(x.get('pitch', np.nan)))
+            else:
+                s += '  yaw%+5.1f pitch%+5.1f px' % (g[0], g[1])
+        s += '  %d/%d  q%.2f' % (int(self.ok.sum()), len(self.ok), self.state.intensity)
+        if len(g) > 2 and np.isfinite(g[2]) and g[2] > self.nonrigid_px:
+            s += '  NON-RIGID %.1fpx' % g[2]
+        k = x.get('worst_lm')
+        if k is not None:
+            s += '  lm%d BAD' % k
+        for w in self.warnings:
+            s += '  ' + w
         return s
 
     def draw(self, image):
@@ -369,9 +508,12 @@ class LandmarkTracker(object):
         self.handles['hinge'].draw(image)
         if not g['track']:
             return
+        worst = (getattr(self.state, 'extra', None) or {}).get('worst_lm')
         for k, (x, y) in enumerate(self.ref_pts):
             if k in self.weak:
                 cv2.circle(image, (int(x), int(y)), 6, (0, 0, 255), 2)   # no texture here
+            elif k == worst:
+                cv2.circle(image, (int(x), int(y)), 7, (0, 180, 255), 2)  # fits worst: move it
             else:
                 cv2.circle(image, (int(x), int(y)), 4, self.bgra_dim, 1)  # reference position
         if len(self.matched):

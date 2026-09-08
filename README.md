@@ -209,31 +209,65 @@ traces of L, R, L−R, head yaw/roll and wingbeat frequency. It is a separate
 process reading the ZMQ stream, so it adds no load to the tracker, and the
 page has no external dependencies (works on an offline rig network).
 
-### 2.5 Front camera: head roll from landmarks
+### 2.5 Front camera: head roll, yaw and pitch from landmarks
 
-From the front, the head's motion under a stimulus is a **combination of roll
-and yaw**: yaw shifts the head features sideways, roll rotates them in the
-image plane. The hinge-based trackers (`edge`/`area`/`rotation`) assume a pure
-rotation about a fixed point, so yaw corrupts their roll estimate and no hinge
-placement works. The `landmarks` tracker (default for the front camera's
-head) separates the two:
+From the front, the head's motion under a stimulus combines **roll, yaw and
+pitch**. Only roll is an in-plane rotation; the other two are seen end-on and
+appear as a *shift* of the head. The hinge-based trackers
+(`edge`/`area`/`rotation`) model a pure rotation about a fixed point, so yaw
+corrupts their roll estimate and no hinge placement works. The `landmarks`
+tracker (default for the front camera's head) separates all three:
+
+| rotation | axis | in the front image | lever arm |
+|---|---|---|---|
+| **roll** | anterior–posterior | in-plane rotation | none — **exact** |
+| **yaw** | dorsoventral | horizontal shift | A–P depth |
+| **pitch** | lateral | vertical shift | **the same** A–P depth |
+
+Put the neck joint at the origin with the landmark centroid at
+(lateral, depth, height): a small yaw moves the centroid sideways by
+`-yaw × depth`, a small pitch moves it vertically by `+pitch × depth`. The
+lateral and height offsets drop out of both. **So one constant converts both
+shifts into angles** — see §2.5.2.
+
+#### 2.5.1 Placing landmarks
 
 1. Make sure the camera's YAML has `head: tracker: landmarks` (the
    `+lm`/`-lm` buttons appear only then; restart after changing it — the
    startup line `front: trackers head=landmarks ...` confirms it).
-   Click `+lm`, then click on a distinctive head feature; repeat for 4–6
+   Click `+lm`, then click on a distinctive head feature; repeat for **4–6**
    landmarks spread over the head: the **edges of both eyes**, the **bright
-   inter-ocular patch**, the **antenna bases**. Landmarks must sit on texture
-   or an edge (a point inside a uniform blob cannot be matched — the tracker
-   marks such a landmark with a red ring and says so in the status line).
-   Landmarks are draggable handles; `-lm` removes the last one.
+   inter-ocular patch**, the **antenna bases**. Landmarks are draggable
+   handles; `-lm` removes the last one.
+
+   Three rules, each enforced with a warning in the status line:
+
+   - **Put them on texture or an edge.** A point inside a uniform blob cannot
+     be matched; such a landmark gets a red ring and is dropped.
+   - **Do not make the layout symmetric.** Four points on a rectangle map onto
+     themselves under a 180° rotation, so the fit cannot tell 0° from 180° and
+     flips between them. The tracker checks this and prints
+     `AMBIGUOUS LAYOUT`. (This is a real failure that happened here: four
+     points 30 px apart, self-symmetric to 3.2 px, sent the roll past 170° in
+     2.5% of frames — while the fit *residual* went **down**, because a
+     consistent swap is still perfectly rigid. Spread the points unevenly.)
+   - **Use 4 or more.** With two, a rigid fit has only one redundant degree of
+     freedom, so the residual cannot detect anything. Below four you get
+     `only N landmarks`.
+
    **Avoid specular highlights** (the bright glints on the curved eye/head
-   surface under IR illumination): they stay where the surface faces the
-   light while the head turns, so they are not attached to the head. Use
-   the eye outline, ommatidia/bristle texture, the inter-ocular stripe and
-   the antenna bases. The overlay prints `NON-RIGID x px` when the landmark
-   set does not move as one body (highlights, legs, proboscis, or a lost
-   match) — a quick way to validate a landmark set on a recording.
+   surface under IR illumination): they stay where the surface faces the light
+   while the head turns, so they are not attached to the head. Use the eye
+   outline, ommatidia/bristle texture, the inter-ocular stripe and the antenna
+   bases. `NON-RIGID x px` appears when the set stops moving as one body
+   (highlights, legs, proboscis, or a lost match), and `lmN BAD` names the one
+   landmark that fits worst over time — it is also circled amber.
+
+   `search_px` is clamped automatically so the matcher can never reach a
+   neighbouring landmark (`search 20->9` in the status line means it was
+   reduced). This is what prevents the swap described above; you do not need
+   to tune it by hand.
+
 2. The posture at the moment you place/move a landmark becomes the zero
    (reference patches are captured then and stored as
    `config/templates_<camera>_head.npz`). Put the hinge on the neck.
@@ -242,37 +276,83 @@ head) separates the two:
    templates from the current frame; `area`/`rotation` trackers restart
    too), or from a script `k.zero()` / `ctl zero`; a `zeroed` event is
    written to the recording so you know which posture the angles refer to.
-3. Each frame, every landmark is located by template matching and a rigid
-   fit of the landmark set gives two things: its **rotation** = the head
-   **roll**, and its **translation** = the head's sideways **displacement**
-   (mostly yaw), after removing the centroid shift that a roll about the neck
-   produces.
 
-**Roll is an angle; the yaw component is recorded as a displacement in
-pixels, not converted to an angle.** The lever arm that would convert a
-lateral shift into a yaw angle is the head's anterior–posterior depth from
-the yaw axis — it points along the optical axis and simply cannot be measured
-in a frontal view, so any such angle would be arbitrarily scaled. The roll
-angle is unaffected by this: it comes from the fit's rotation and needs no
-lever arm or rotation center at all. If you ever need absolute yaw, calibrate
-the pixels offline by regressing `front/head_dx_corr` against the bottom
-camera's `bottom/head_angle` — both are in the same HDF5 file on the same
-clock.
+3. Each frame every landmark is located by template matching, and a rigid fit
+   of the set gives its **rotation** (the roll) and its **translation** (the
+   yaw and pitch channels), after removing the centroid shift that a roll
+   about the neck produces.
 
-Outputs: `angles = [roll]` (radians), `radii = [dx, dy]` (raw head shift, px),
+#### 2.5.2 Yaw and pitch are recorded in pixels until calibrated
+
+**Roll is an angle; yaw and pitch are recorded as displacements in pixels.**
+Their shared lever arm — the head's anterior–posterior depth from the neck —
+points along the optical axis, so a frontal view cannot measure it and any
+angle derived from it would be arbitrarily scaled. Roll is unaffected: it is
+the fit's rotation and needs no lever arm or rotation centre at all.
+
+To get absolute angles, fit that one constant against a reference that *can*
+measure yaw, then apply it to **both** channels:
+
+```bash
+jupyter lab notebooks/calibrate_lever.ipynb
+```
+
+The notebook uses `kinefly2/analysis/calibrate.py` and takes the reference yaw
+from the bottom camera's `bottom/head_angle` (a true in-plane rotation there),
+from an external rotation stage, or from spontaneous yaw pooled over long
+recordings; `epochs_from_events()` restricts the fit to stimulus trials. The
+fit is robust (Huber) and **gated**: it refuses to hand back a constant unless
+the reference yaw spans ≥5°, r² ≥ 0.5 and the bootstrap CI is under 20% of the
+estimate. A lever arm fitted from a fly that barely moved its head is not a
+measurement but noise with units, and it would silently rescale every yaw and
+pitch number afterwards. (The 2026-08-19 cam1/cam2 pair is correctly rejected:
+bottom-camera yaw std 0.35° against 0.22° of frame-to-frame noise.)
+
+Once known, put it in the head's section:
+
+```yaml
+tracker:
+  head:
+    tracker: landmarks
+    lever_px: 92.4      # px per radian, from the notebook
+```
+
+`front/head_yaw` and `front/head_pitch` are then logged in radians and the GUI
+switches to degrees. Without it those columns stay NaN rather than a guess.
+The constant is specific to the fly, the magnification and the landmark set —
+re-fit after moving the camera, changing the lens or refocusing. Calibration
+is deliberately **post hoc**: the pixel channels are what get recorded, so a
+better constant can always be re-applied to old data.
+
+#### 2.5.3 Outputs
+
+`angles = [roll]` (radians), `radii = [dx, dy]` (raw head shift, px),
 `gradients = [dx_corr, dy_corr, residual]` (shift with the roll-induced part
-removed, px; fit residual, px), plus match quality. Logged as
-`front/head_angle` (roll), `head_dx`, `head_dy`, `head_dx_corr`,
-`head_dy_corr`, `head_fit_residual`, `head_score`. The dashboard shows the
-roll trace and a "Head translation (front)" trace in pixels. In the camera
-window the readout sits with the other parts in the bottom-left corner:
-`HEAD:  +2.4 deg  5/5  q0.88` — the roll in degrees, how many landmarks
-matched this frame, and `q`, the mean template match score (normalized
-cross-correlation, 0–1; landmarks scoring below `min_score` are dropped).
-`NON-RIGID x px` is appended when the landmarks stop moving as one body.
-Parameters (`tracker: head:`): `template_px`, `search_px`, `min_score`,
-`fit: rigid|similarity`, `rotate_templates`, `smooth`. Cost ≈ 0.3–0.6 ms.
-Focus and magnification of the front camera matter more than frame rate.
+removed, px; fit residual, px), and `extra` (roll precision, quality flags,
+and the calibrated angles when available). Logged per camera as
+`head_angle` (roll), `head_dx`, `head_dy`, **`head_dx_corr` (yaw)**,
+**`head_dy_corr` (pitch)**, `head_fit_residual`, `head_score`,
+`head_roll_sigma`, and `head_yaw` / `head_pitch` (NaN until `lever_px` is set).
+The dashboard plots roll, yaw and pitch separately.
+
+In the camera window the readout sits with the other parts in the bottom-left
+corner, wrapping onto a second line when needed:
+
+```
+HEAD:   +2.4 deg +-1.0  yaw +2.0 pitch -1.3 px  5/5  q0.88  search 20->9
+```
+
+roll in degrees; `+-1.0` the roll uncertainty this landmark layout can deliver
+(`residual / (spread × √N)`, so more and wider-spread landmarks tighten it);
+the yaw and pitch channels (px, or degrees once calibrated); how many
+landmarks matched; and `q`, the mean template match score (normalized
+cross-correlation, 0–1; landmarks below `min_score` are dropped). Warnings
+follow.
+
+Parameters (`tracker: head:`): `template_px`, `search_px` (auto-clamped),
+`min_score`, `fit: rigid|similarity`, `rotate_templates`, `smooth`,
+`nonrigid_px`, `lever_px`. Cost ≈ 0.3–0.6 ms. Focus and magnification of the
+front camera matter more than frame rate.
 
 ### 2.6 Timing validation
 
@@ -387,12 +467,12 @@ apply). Anything missing falls back to `tracker_defaults()`.
 
 | Key | Meaning |
 |---|---|
-| `tracker` | Algorithm: `edge` (radial edge angle — wings, or antennae for head yaw), `area` (rotation via polar image registration — head), `rotation` (rotation via template rotation search about the hinge; ~1 ms/frame), `landmarks` (user-placed landmarks + rigid fit → roll and yaw separately; the front-camera head default, section 2.5), `tip` (farthest point — abdomen), `intensity` (mean intensity + wingbeat frequency — aux). |
+| `tracker` | Algorithm: `edge` (radial edge angle — wings, or antennae for head yaw), `area` (rotation via polar image registration — head), `rotation` (rotation via template rotation search about the hinge; ~1 ms/frame), `landmarks` (user-placed landmarks + rigid fit → roll, yaw and pitch on separate channels; the front-camera head default, section 2.5), `tip` (farthest point — abdomen), `intensity` (mean intensity + wingbeat frequency — aux). |
 | `autozero` | Auto-center the reported angle on the resting position. |
 | `threshold` | Edge-strength threshold (edge tracker); 0 = accept all. |
 | `feathering` | Softening of mask edges (0–1). |
 | `search_deg` | `rotation` tracker only: half-range of the rotation search in degrees (default 8). |
-| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px` | `landmarks` tracker only: patch size, search radius, acceptance threshold, `rigid`/`similarity` fit, rotated re-matching for large rolls, output EMA, and the fit residual above which the overlay warns `NON-RIGID`. Landmark positions live in `gui.<part>.landmarks`. |
+| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px`, `lever_px` | `landmarks` tracker only: patch size; search radius (**auto-clamped** so the matcher cannot reach a neighbouring landmark — see 2.5.1); acceptance threshold; `rigid`/`similarity` fit; rotated re-matching for large rolls; output EMA; the fit residual above which the overlay warns `NON-RIGID`; and `lever_px`, the px-per-radian constant that turns the yaw and pitch channels into angles (unset = those columns stay NaN; fit it with `notebooks/calibrate_lever.ipynb`, see 2.5.2). Landmark positions live in `gui.<part>.landmarks`. |
 | `polar_amplify` | Angular resolution multiplier of the polar transform (default 1.0). Raise (2–4) to resolve small rotations (e.g. head roll of a few degrees) at the cost of ~1–3 ms/frame for that part. |
 | `saturation_correction` | Compensate saturated pixels when background-subtracting. |
 
@@ -416,8 +496,12 @@ One row per merged state: `/merged/seq`, `/merged/t_host`, `/merged/t_wall`, and
 `/<cam>/seq`, `t_camera`, `t_host`, `t_done`, `/<cam>/<part>_angle` and
 `_radius` for head/abdomen/left/right, `/<cam>/aux_intensity`, `aux_freq`.
 With the `landmarks` tracker on the head, also `/<cam>/head_dx`, `head_dy`
-(raw head translation, px), `head_dx_corr`, `head_dy_corr` (roll-induced part
-removed), `head_fit_residual`, `head_score` — NaN for other trackers.
+(raw head translation, px), **`head_dx_corr`** and **`head_dy_corr`** (roll-induced
+part removed — from a front view these are the head's **yaw** and **pitch**,
+seen end-on, both in px through the same lever arm), `head_fit_residual`,
+`head_score`, `head_roll_sigma` (roll uncertainty, rad), and `head_yaw` /
+`head_pitch` (rad — NaN unless `lever_px` is calibrated, section 2.5.2). All
+NaN for other trackers.
 Times are seconds (host clock is monotonic; `t_camera` is the device clock;
 `t_wall` is `time.time()`). Events: `/events/t_host`, `/events/t_wall`,
 `/events/text`. Readable with h5py or MATLAB's `h5read`.
@@ -440,7 +524,7 @@ displacements are always pixels.
   independent system with its own config, background and reference files.
 - **Different views / body parts:** each camera YAML is independent — e.g. use
   the front camera's `left`/`right` edge trackers for wing-envelope roll edges
-  and its `head` `landmarks` tracker for head roll + yaw (section 2.5). Head yaw from below can use
+  and its `head` `landmarks` tracker for head roll, yaw and pitch (section 2.5). Head yaw from below can use
   `tracker: edge` with a narrow annulus over the antennae instead of `area`.
 - **Different frame rate:** set `fps` in the camera YAML; nothing else assumes
   90 Hz.
@@ -472,8 +556,10 @@ kinefly2/apps/       run_offline, run_rig, ctl (command-line control), check_lat
 kinefly2/client.py   Python client for experiment scripts (start/stop/event/status/states)
 kinefly2/core/session.py   recording sessions (attach/detach logger + video at runtime)
 kinefly2/gui/autoplace.py  automatic region placement (registration / silhouette)
+kinefly2/analysis/   offline analysis: calibrate.py (yaw/pitch lever arm) - not in the real-time path
 config/              rig.yaml + per-camera YAMLs + saved backgrounds/references
 experiments/         per-recording settings templates
+notebooks/           calibrate_lever.ipynb - post-hoc yaw/pitch calibration
 tests/               synthetic-video generator + ground-truth and architecture tests
 ```
 
@@ -489,6 +575,13 @@ tests/               synthetic-video generator + ground-truth and architecture t
 - [x] Continuous operation with script-triggered recording sessions (command
       socket + Python client + CLI + GUI record button), camera reconnect.
 - [x] Front-camera head roll + yaw via landmark tracking (`landmarks` tracker).
+- [x] Head **pitch** as the landmark tracker's vertical channel, sharing one
+      lever arm with yaw; landmark-layout safety checks (ambiguous layouts,
+      auto-clamped search radius, per-landmark residuals, roll precision).
+- [ ] Fit `lever_px` and turn the yaw/pitch pixels into angles - needs a
+      recording with real head yaw (optomotor stimulus, or a rotation stage);
+      `notebooks/calibrate_lever.ipynb` is ready and currently rejects the
+      2026-08-19 pair for having only 0.35 deg of yaw.
 - [ ] Live PySpin validation at 90 Hz on the rig (pending the Linux machine
       and FLIR cameras).
 - [ ] Reiser LED-panel closed-loop sink (pending the arena). Verify the

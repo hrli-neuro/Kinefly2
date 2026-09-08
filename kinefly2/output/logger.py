@@ -6,8 +6,23 @@ Layout, one row per merged state (angles in RADIANS; the GUI displays degrees):
     /<camera>/<part>_angle, <part>_radius   for head, abdomen, left, right
     /<camera>/aux_intensity, /<camera>/aux_freq
     /<camera>/head_dx, head_dy              head translation, px (landmarks tracker)
-    /<camera>/head_dx_corr, head_dy_corr    same, with the roll-induced shift removed
+    /<camera>/head_dx_corr, head_dy_corr    same, with the roll-induced shift removed.
+                                            From a front view these ARE the other two
+                                            head rotations seen end-on: dx_corr is YAW,
+                                            dy_corr is PITCH, both scaled by the same
+                                            lever arm (the head's anterior-posterior
+                                            depth from the neck). That depth lies along
+                                            the optical axis and cannot be measured from
+                                            the front, so these stay in PIXELS. Fit the
+                                            one constant post hoc with
+                                            kinefly2.analysis.calibrate.
+    /<camera>/head_yaw, head_pitch          the same two channels as ANGLES in radians --
+                                            only when `lever_px` is set in the camera
+                                            config, otherwise NaN (never a guess).
     /<camera>/head_fit_residual, head_score landmark fit quality
+    /<camera>/head_roll_sigma               roll uncertainty, radians (residual / (spread
+                                            * sqrt(N))): the precision the current
+                                            landmark layout can actually deliver
 Events (from EventReceiver or log_event), one row per event:
     /events/t_host, /events/t_wall, /events/text
 
@@ -28,7 +43,8 @@ import numpy as np
 from .base import FlystateSink
 
 PARTS = ('head', 'abdomen', 'left', 'right')
-HEAD_EXTRA = ('dx', 'dy', 'dx_corr', 'dy_corr', 'fit_residual', 'score')
+HEAD_EXTRA = ('dx', 'dy', 'dx_corr', 'dy_corr', 'fit_residual', 'score',
+              'yaw', 'pitch', 'roll_sigma')
 CHUNK = 1024
 
 
@@ -108,6 +124,10 @@ class Hdf5Logger(FlystateSink):
             row['%s/head_dy_corr' % cam] = hd.gradients[1] if lm else math.nan
             row['%s/head_fit_residual' % cam] = hd.gradients[2] if lm else math.nan
             row['%s/head_score' % cam] = hd.intensity if lm else math.nan
+            # yaw/pitch are NaN until lever_px is calibrated; roll_sigma always.
+            ex = hd.extra if lm else {}
+            for col in ('yaw', 'pitch', 'roll_sigma'):
+                row['%s/head_%s' % (cam, col)] = ex.get(col, math.nan)
         try:
             self.queue.put_nowait(('state', row))
         except queue.Full:

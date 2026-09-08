@@ -62,7 +62,10 @@ class StateBuffer:
                 try:
                     head = state['cameras'][cam]['parts']['head']
                     if head.get('kind') == 'landmarks' and len(head.get('gradients') or []) >= 3:
-                        row['%s/head_dx' % cam] = head['gradients'][0]   # px, roll removed
+                        # From a front view these two are the other head
+                        # rotations seen end-on: dx is yaw, dy is pitch, both
+                        # in px until lever_px is calibrated.
+                        row['%s/head_dx' % cam] = head['gradients'][0]
                         row['%s/head_dy' % cam] = head['gradients'][1]
                 except KeyError:
                     pass
@@ -104,7 +107,8 @@ const specs=[
  {title:'L − R (bottom)', keys:['L-R'], colors:['#fd5'], unit:'deg', zero:true},
  {title:'Head yaw (bottom)', keys:['bottom/head'], colors:['#8f8'], unit:'deg', zero:true},
  {title:'Head roll (front)', keys:['front/head'], colors:['#c8f'], unit:'deg', zero:true},
- {title:'Head translation (front, roll removed)', keys:['front/head_dx','front/head_dy'], colors:['#c8f','#8cf'], unit:'px', zero:true},
+ {title:'Head yaw (front, uncalibrated)', keys:['front/head_dx'], colors:['#c8f'], unit:'px', zero:true},
+ {title:'Head pitch (front, uncalibrated)', keys:['front/head_dy'], colors:['#8cf'], unit:'px', zero:true},
  {title:'Wingbeat frequency (bottom aux)', keys:['bottom/wbf'], colors:['#fa6'], unit:'Hz'},
 ];
 const data=[]; let last=null, n=0, t0=null;

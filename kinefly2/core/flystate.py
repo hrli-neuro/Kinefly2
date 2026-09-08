@@ -24,6 +24,7 @@ class BodypartState:
     freq: float = 0.0                              # Wingbeat frequency (aux tracker), Hz.
     intensity: float = 0.0
     kind: str = None                               # Tracker type, when it matters ('landmarks').
+    extra: dict = field(default_factory=dict)      # Named tracker-specific channels.
 
     @classmethod
     def from_msg(cls, msg):
@@ -37,7 +38,8 @@ class BodypartState:
         intensity = msg.intensity if isinstance(msg.intensity, (int, float)) else 0.0
         return cls(angles=listify(msg.angles), gradients=listify(msg.gradients),
                    radii=listify(msg.radii), freq=float(freq), intensity=float(intensity),
-                   kind=getattr(msg, 'kind', None))
+                   kind=getattr(msg, 'kind', None),
+                   extra=dict(getattr(msg, 'extra', None) or {}))
 
     @property
     def angle(self):
@@ -50,7 +52,7 @@ class BodypartState:
     def to_dict(self):
         return {'angles': self.angles, 'gradients': self.gradients,
                 'radii': self.radii, 'freq': self.freq, 'intensity': self.intensity,
-                'kind': self.kind}
+                'kind': self.kind, 'extra': self.extra}
 
 
 @dataclass
