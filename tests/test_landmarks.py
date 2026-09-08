@@ -39,6 +39,11 @@ def make_config(path, landmarks, tracker='landmarks'):
 
 
 def run(tracker, roll_amp, yaw_amp, n=360):
+    """Returns (roll_truth, yaw_truth, roll_est_rad, shift_x_px, ms_per_frame).
+
+    The yaw signal is rendered as a lateral shift of the head, so the tracker's
+    x displacement (roll-induced part removed) is what should follow it -- no
+    yaw ANGLE is computed, by design."""
     from tests.make_synthetic_video import draw_front_frame
     from kinefly2.camera.base import Frame
     from kinefly2.gui.app import TrackerView
@@ -48,7 +53,7 @@ def run(tracker, roll_amp, yaw_amp, n=360):
     img0, lm0 = draw_front_frame(0.0, 0.0)
     make_config(cfg, [lm0[k] for k in ('eye_l', 'eye_r', 'patch', 'ant_l', 'ant_r')], tracker)
     view = TrackerView('front', cfg, use_gui=False)
-    rolls, yaws, est_roll, est_yaw, dts = [], [], [], [], []
+    rolls, yaws, est_roll, est_shift, dts = [], [], [], [], []
     for i in range(n):
         t = i / FPS
         roll = roll_amp * math.sin(2 * math.pi * 0.7 * t)
@@ -57,14 +62,14 @@ def run(tracker, roll_amp, yaw_amp, n=360):
         t0 = time.perf_counter()
         st = view.process(Frame(image=img, t_camera=t, t_host=time.monotonic(), frame_id=i))
         dts.append(time.perf_counter() - t0)
-        a = st.parts['head'].angles
-        est_roll.append(a[0] if len(a) > 0 else np.nan)
-        est_yaw.append(a[1] if len(a) > 1 else np.nan)
+        part = st.parts['head']
+        est_roll.append(part.angles[0] if len(part.angles) > 0 else np.nan)
+        est_shift.append(part.gradients[0] if len(part.gradients) >= 3 else np.nan)
         rolls.append(math.radians(roll))
         yaws.append(math.radians(yaw))
         if i == 0:
             view.render()
-    return (np.array(rolls), np.array(yaws), np.array(est_roll), np.array(est_yaw),
+    return (np.array(rolls), np.array(yaws), np.array(est_roll), np.array(est_shift),
             1e3 * np.median(dts[10:]))
 
 
@@ -75,18 +80,26 @@ def corr(a, b):
 
 def test_landmarks_separate_roll_and_yaw():
     for roll_amp in (3.0, 20.0):
-        rolls, yaws, er, ey, dt = run('landmarks', roll_amp, 15.0)
-        c_rr, c_ry, c_yy = corr(er, rolls), corr(er, yaws), corr(ey, yaws)
+        rolls, yaws, er, shift, dt = run('landmarks', roll_amp, 15.0)
+        c_rr, c_ry, c_sy = corr(er, rolls), corr(er, yaws), corr(shift, yaws)
         gain = np.polyfit(rolls[5:], er[5:], 1)[0]
         valid = np.isfinite(er).mean()
         print('landmarks roll %2.0f deg + yaw 15 deg: roll r=%+.3f gain %.2f | roll~yaw r=%+.3f | '
-              'yaw r=%+.3f | valid %.0f%% | %.2f ms' % (roll_amp, c_rr, gain, c_ry, c_yy, 100 * valid, dt))
+              'shift~yaw r=%+.3f | valid %.0f%% | %.2f ms' % (roll_amp, c_rr, gain, c_ry, c_sy,
+                                                              100 * valid, dt))
         assert valid > 0.98
         assert c_rr > 0.98, 'roll not tracked (r=%.3f)' % c_rr
         assert 0.9 < gain < 1.1, 'roll gain %.2f' % gain
         assert abs(c_ry) < 0.15, 'roll estimate leaks yaw (r=%.3f)' % c_ry
-        assert c_yy > 0.95, 'yaw not tracked (r=%.3f)' % c_yy
+        assert abs(c_sy) > 0.95, 'head translation does not follow yaw (r=%.3f)' % c_sy
         assert dt < 1.5, 'too slow: %.2f ms' % dt
+
+    # A pure roll must leave (almost) no translation once the roll-induced
+    # centroid shift about the hinge has been removed.
+    rolls, _, er, shift, _ = run('landmarks', 20.0, 0.0)
+    span = np.nanmax(shift[5:]) - np.nanmin(shift[5:])
+    print('landmarks roll 20 deg, no yaw: residual translation span %.2f px' % span)
+    assert span < 3.0, 'pure roll leaks into translation (%.2f px)' % span
 
     # The hinge-based rotation tracker must be corrupted by the same yaw.
     rolls, yaws, er, _, dt = run('rotation', 20.0, 15.0)
@@ -119,6 +132,8 @@ def test_zero_recaptures_templates():
     view.process(Frame(image=img0, t_camera=0, t_host=time.monotonic(), frame_id=0))
     img1, _ = draw_front_frame(10.0, 0.0)               # head rolled 10 deg
     st = view.process(Frame(image=img1, t_camera=0.1, t_host=time.monotonic(), frame_id=1))
+    assert st.parts['head'].kind == 'landmarks'
+    assert len(st.parts['head'].angles) == 1, 'angles must hold the roll only'
     assert abs(math.degrees(st.parts['head'].angles[0]) - 10) < 1.0
     summary = view.zero_all()                           # this (rolled) posture = zero
     assert 'head 5/5' in summary, summary

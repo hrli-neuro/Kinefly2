@@ -135,6 +135,7 @@ def test_recording_pipeline_and_events():
     assert [int(r['frame_id']) for r in rows] == list(range(300))
 
     with h5py.File(exp.path('_flystate.h5')) as f:
+        assert 'bottom/head_dx_corr' in f and 'bottom/head_yaw' not in f, list(f['bottom'])
         seq = f['bottom/seq'][:]
         assert len(seq) == 300 and seq[0] == 0 and seq[-1] == 299
         assert np.isfinite(f['merged/t_wall'][:]).all()

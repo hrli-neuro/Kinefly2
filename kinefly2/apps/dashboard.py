@@ -55,9 +55,17 @@ class StateBuffer:
             cams = list(state.get('cameras', {}))
             row = {'t': state['t_host'], 'seq': state['seq']}
             for cam in cams:
+                # Angles arrive in radians; display in degrees.
                 for part in ('left', 'right', 'head', 'abdomen'):
-                    row['%s/%s' % (cam, part)] = self._angle(state, cam, part)
-                row['%s/head_yaw' % cam] = self._angle(state, cam, 'head', 1)
+                    a = self._angle(state, cam, part)
+                    row['%s/%s' % (cam, part)] = None if a is None else math.degrees(a)
+                try:
+                    head = state['cameras'][cam]['parts']['head']
+                    if head.get('kind') == 'landmarks' and len(head.get('gradients') or []) >= 3:
+                        row['%s/head_dx' % cam] = head['gradients'][0]   # px, roll removed
+                        row['%s/head_dy' % cam] = head['gradients'][1]
+                except KeyError:
+                    pass
                 try:
                     row['%s/wbf' % cam] = state['cameras'][cam]['parts']['aux']['freq']
                 except KeyError:
@@ -92,11 +100,11 @@ canvas{width:100%;height:120px;display:block;background:#181818;border:1px solid
 <script>
 const H=30; // seconds of history
 const specs=[
- {title:'Wing stroke amplitude (bottom)', keys:['bottom/left','bottom/right'], colors:['#e55','#5be'], unit:'rad'},
- {title:'L − R (bottom)', keys:['L-R'], colors:['#fd5'], unit:'rad', zero:true},
- {title:'Head yaw (bottom)', keys:['bottom/head'], colors:['#8f8'], unit:'rad', zero:true},
- {title:'Head roll (front)', keys:['front/head'], colors:['#c8f'], unit:'rad', zero:true},
- {title:'Head yaw: bottom (green) vs front landmarks (purple)', keys:['bottom/head','front/head_yaw'], colors:['#8f8','#c8f'], unit:'rad', zero:true},
+ {title:'Wing stroke amplitude (bottom)', keys:['bottom/left','bottom/right'], colors:['#e55','#5be'], unit:'deg'},
+ {title:'L − R (bottom)', keys:['L-R'], colors:['#fd5'], unit:'deg', zero:true},
+ {title:'Head yaw (bottom)', keys:['bottom/head'], colors:['#8f8'], unit:'deg', zero:true},
+ {title:'Head roll (front)', keys:['front/head'], colors:['#c8f'], unit:'deg', zero:true},
+ {title:'Head translation (front, roll removed)', keys:['front/head_dx','front/head_dy'], colors:['#c8f','#8cf'], unit:'px', zero:true},
  {title:'Wingbeat frequency (bottom aux)', keys:['bottom/wbf'], colors:['#fa6'], unit:'Hz'},
 ];
 const data=[]; let last=null, n=0, t0=null;

@@ -209,7 +209,7 @@ traces of L, R, L−R, head yaw/roll and wingbeat frequency. It is a separate
 process reading the ZMQ stream, so it adds no load to the tracker, and the
 page has no external dependencies (works on an offline rig network).
 
-### 2.5 Front camera: head roll and yaw from landmarks
+### 2.5 Front camera: head roll from landmarks
 
 From the front, the head's motion under a stimulus is a **combination of roll
 and yaw**: yaw shifts the head features sideways, roll rotates them in the
@@ -243,15 +243,28 @@ head) separates the two:
    too), or from a script `k.zero()` / `ctl zero`; a `zeroed` event is
    written to the recording so you know which posture the angles refer to.
 3. Each frame, every landmark is located by template matching and a rigid
-   fit of the landmark set gives **roll** (its rotation) and **yaw** (its
-   lateral shift after removing the shift a roll about the neck produces,
-   converted to an angle with the neck→head distance, `yaw_radius`).
+   fit of the landmark set gives two things: its **rotation** = the head
+   **roll**, and its **translation** = the head's sideways **displacement**
+   (mostly yaw), after removing the centroid shift that a roll about the neck
+   produces.
 
-Outputs: `angles = [roll, yaw]` (radians), `radii = [dx, dy]` (head shift,
-px), fit residual and match quality; logged as `front/head_angle` (roll),
-`front/head_yaw`, `head_dx`, `head_dy`, `head_fit_residual`, `head_score`.
-The dashboard overlays the front-view yaw on the bottom camera's head yaw as a
-check of the separation (the bottom view remains the authoritative yaw).
+**Roll is an angle; the yaw component is recorded as a displacement in
+pixels, not converted to an angle.** The lever arm that would convert a
+lateral shift into a yaw angle is the head's anterior–posterior depth from
+the yaw axis — it points along the optical axis and simply cannot be measured
+in a frontal view, so any such angle would be arbitrarily scaled. The roll
+angle is unaffected by this: it comes from the fit's rotation and needs no
+lever arm or rotation center at all. If you ever need absolute yaw, calibrate
+the pixels offline by regressing `front/head_dx_corr` against the bottom
+camera's `bottom/head_angle` — both are in the same HDF5 file on the same
+clock.
+
+Outputs: `angles = [roll]` (radians), `radii = [dx, dy]` (raw head shift, px),
+`gradients = [dx_corr, dy_corr, residual]` (shift with the roll-induced part
+removed, px; fit residual, px), plus match quality. Logged as
+`front/head_angle` (roll), `head_dx`, `head_dy`, `head_dx_corr`,
+`head_dy_corr`, `head_fit_residual`, `head_score`. The dashboard shows the
+roll trace and a "Head translation (front)" trace in pixels.
 Parameters (`tracker: head:`): `template_px`, `search_px`, `min_score`,
 `fit: rigid|similarity`, `rotate_templates`, `smooth`. Cost ≈ 0.3–0.6 ms.
 Focus and magnification of the front camera matter more than frame rate.
@@ -374,7 +387,7 @@ apply). Anything missing falls back to `tracker_defaults()`.
 | `threshold` | Edge-strength threshold (edge tracker); 0 = accept all. |
 | `feathering` | Softening of mask edges (0–1). |
 | `search_deg` | `rotation` tracker only: half-range of the rotation search in degrees (default 8). |
-| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth` | `landmarks` tracker only: patch size, search radius, acceptance threshold, `rigid`/`similarity` fit, rotated re-matching for large rolls, output EMA. Landmark positions live in `gui.<part>.landmarks`, the yaw lever arm in `gui.<part>.yaw_radius`. |
+| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px` | `landmarks` tracker only: patch size, search radius, acceptance threshold, `rigid`/`similarity` fit, rotated re-matching for large rolls, output EMA, and the fit residual above which the overlay warns `NON-RIGID`. Landmark positions live in `gui.<part>.landmarks`. |
 | `polar_amplify` | Angular resolution multiplier of the polar transform (default 1.0). Raise (2–4) to resolve small rotations (e.g. head roll of a few degrees) at the cost of ~1–3 ms/frame for that part. |
 | `saturation_correction` | Compensate saturated pixels when background-subtracting. |
 
@@ -397,9 +410,17 @@ apply). Anything missing falls back to `tracker_defaults()`.
 One row per merged state: `/merged/seq`, `/merged/t_host`, `/merged/t_wall`, and per camera
 `/<cam>/seq`, `t_camera`, `t_host`, `t_done`, `/<cam>/<part>_angle` and
 `_radius` for head/abdomen/left/right, `/<cam>/aux_intensity`, `aux_freq`.
-Angles are radians; times are seconds (host clock is monotonic; `t_camera` is
-the device clock; `t_wall` is `time.time()`). Events: `/events/t_host`, `/events/t_wall`,
+With the `landmarks` tracker on the head, also `/<cam>/head_dx`, `head_dy`
+(raw head translation, px), `head_dx_corr`, `head_dy_corr` (roll-induced part
+removed), `head_fit_residual`, `head_score` — NaN for other trackers.
+Times are seconds (host clock is monotonic; `t_camera` is the device clock;
+`t_wall` is `time.time()`). Events: `/events/t_host`, `/events/t_wall`,
 `/events/text`. Readable with h5py or MATLAB's `h5read`.
+
+**Units.** Angles are **radians** everywhere they are stored or streamed
+(HDF5, ZMQ, the CSV from `run_offline`), as in the original Kinefly. The GUI
+overlay and the dashboard **display degrees** (`HEAD: 2.4 deg`), and
+displacements are always pixels.
 
 ---
 

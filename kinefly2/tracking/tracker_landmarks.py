@@ -1,4 +1,5 @@
-"""LandmarkTracker: head roll AND yaw from user-placed landmarks.
+"""LandmarkTracker: head roll (angle) and head translation (pixels) from
+user-placed landmarks.
 
 The user places a few landmarks on distinctive head features (eye edges, the
 bright inter-ocular patch, antenna bases). Each frame, every landmark is
@@ -6,27 +7,35 @@ located by normalized template matching of its reference patch inside a
 small search window; a rigid (or similarity) fit of the reference landmark
 positions onto the measured ones decomposes the head motion:
 
-    rotation of the fit          -> roll   (in-plane rotation)
-    lateral translation of the fit -> yaw  (from the front, yaw shifts the
-                                            head sideways), after removing the
-                                            centroid shift that a roll about the
-                                            neck hinge produces; converted to an
-                                            angle with the neck->head radius
+    rotation of the fit    -> ROLL, an angle (in-plane rotation; needs no
+                              rotation center, so it is exact regardless of
+                              where the hinge is placed)
+    translation of the fit -> the head's DISPLACEMENT in pixels, after removing
+                              the centroid shift that a roll about the neck
+                              hinge produces. From the front this is mostly
+                              yaw, but it is deliberately NOT converted to a
+                              yaw angle: that lever arm is the head's
+                              anterior-posterior depth from the yaw axis, which
+                              points along the optical axis and cannot be
+                              measured in a frontal view. Calibrate the pixels
+                              offline (e.g. against the bottom camera's head
+                              yaw) if an absolute angle is needed.
 
 Unlike the hinge-based trackers (edge/area/rotation) this needs no rotation
 center and is not corrupted by combined roll+yaw. Blob-like features also
 survive soft focus. Cost: N small matchTemplate calls, well under 1 ms.
 
-Outputs (bodypart frame, like the other trackers):
-    state.angles    = [roll, yaw]           radians
-    state.radii     = [dx, dy]              head centroid shift, px
-    state.gradients = [residual_px, axial]  fit residual; along-axis shift (pitch/approach)
-    state.intensity = mean match score      0..1 quality
+Outputs (like the other trackers: angles in radians; the GUI displays degrees):
+    state.angles    = [roll]                        radians
+    state.radii     = [dx, dy]                      raw centroid shift, px
+    state.gradients = [dx_corr, dy_corr, residual]  roll-removed shift, px; fit residual, px
+    state.intensity = mean match score              0..1 quality
+    state.kind      = 'landmarks'
 Per-part parameters (tracker: section): template_px, search_px, min_score,
 fit ('rigid'|'similarity'), rotate_templates, smooth, nonrigid_px (residual
 above which the overlay warns that the landmarks do not move as one body:
 landmarks on specular highlights, legs, or the proboscis, or a mismatch).
-Geometry (gui.<part>): hinge (neck), landmarks: [{x, y}, ...], yaw_radius.
+Geometry (gui.<part>): hinge (neck pivot), landmarks: [{x, y}, ...].
 """
 import os
 
@@ -124,7 +133,6 @@ class LandmarkTracker(object):
         self.scores = np.zeros(0)
         self.ok = np.zeros(0, dtype=bool)
         self.roll_s = None
-        self.yaw_s = None
         self.set_params(params)
 
     # ------------------------------------------------------------ geometry
@@ -145,24 +153,16 @@ class LandmarkTracker(object):
         self.smooth = float(t.get('smooth', 0.0))
         self.nonrigid_px = float(t.get('nonrigid_px', 2.0))   # residual above this = warn
         self.ptHinge_i = np.array([g['hinge']['x'], g['hinge']['y']], dtype=float)
-        # Body axis (abdomen -> head) defines lateral (yaw) vs axial directions.
-        h = params['gui']['head']['hinge']
-        a = params['gui']['abdomen']['hinge']
-        ax = np.array([h['x'] - a['x'], h['y'] - a['y']], dtype=float)
-        n = np.linalg.norm(ax)
-        self.axial = ax / n if n > 0 else np.array([0.0, -1.0])
-        self.lateral = np.array([-self.axial[1], self.axial[0]])
         pts = np.array(self.landmarks(), dtype=float).reshape(-1, 2)
         # Keep templates only if the landmarks did not move.
         if self.template_pts is None or len(self.template_pts) != len(pts) or \
                 (len(pts) and np.abs(self.template_pts - pts).max() > 0.5):
             self.templates, self.templates_big, self.template_pts = [], [], None
         self.ref_pts = pts
-        self.yaw_radius = float(g.get('yaw_radius') or 0.0)
-        if self.yaw_radius <= 0 and len(pts):
-            self.yaw_radius = float(np.linalg.norm(pts.mean(0) - self.ptHinge_i)) or 1.0
+        # Half the landmark spread: only used to size the drawn axis line.
+        self.draw_len = float(np.abs(pts - pts.mean(0)).max()) if len(pts) else 0.0
         self.last_fit = None
-        self.roll_s = self.yaw_s = None
+        self.roll_s = None
         self.update_handle_points()
 
     def update_handle_points(self):
@@ -323,32 +323,32 @@ class LandmarkTracker(object):
 
         if fit is None:
             self.last_fit = None
-            self.state.angles = [np.nan, np.nan]
+            self.state.angles = [np.nan]
             self.state.radii = [np.nan, np.nan]
-            self.state.gradients = [np.nan, np.nan]
+            self.state.gradients = [np.nan, np.nan, np.nan]
+            self.state.kind = 'landmarks'
             self.state.intensity = float(scores[np.isfinite(scores)].mean()) if np.isfinite(scores).any() else 0.0
             return
         theta, scale, dc, resid = fit
         self.last_fit = (theta, scale, dc)
         roll = self.sense * theta
         # The head rolls about the neck (hinge), so a roll by itself displaces
-        # the landmark centroid; remove that part before reading yaw from the
-        # remaining lateral shift.
+        # the landmark centroid; remove that part, leaving the head's true
+        # translation (mostly yaw from the front) in PIXELS. It is not turned
+        # into an angle: the yaw lever arm is the head's anterior-posterior
+        # depth, which a frontal view cannot measure.
         R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
         arm = self.ref_pts.mean(0) - self.ptHinge_i
-        dc_yaw = dc - (R @ arm - arm)
-        lateral = float(dc_yaw @ self.lateral)
-        axial = float(dc_yaw @ self.axial)
-        yaw = float(np.arctan2(lateral, self.yaw_radius))
+        dc_corr = dc - (R @ arm - arm)
         if self.smooth > 0:
             a = self.smooth
             self.roll_s = roll if self.roll_s is None else (1 - a) * roll + a * self.roll_s
-            self.yaw_s = yaw if self.yaw_s is None else (1 - a) * yaw + a * self.yaw_s
-            roll, yaw = self.roll_s, self.yaw_s
-        self.state.angles = [float(roll), yaw]
+            roll = self.roll_s
+        self.state.angles = [float(roll)]
         self.state.radii = [float(dc[0]), float(dc[1])]
-        self.state.gradients = [resid, axial]
+        self.state.gradients = [float(dc_corr[0]), float(dc_corr[1]), resid]
         self.state.intensity = float(scores[ok].mean())
+        self.state.kind = 'landmarks'
 
     # ------------------------------------------------------------- drawing
 
@@ -370,22 +370,26 @@ class LandmarkTracker(object):
                 col = (0, 220, 0) if self.ok[k] else (0, 0, 255)
                 cv2.drawMarker(image, (int(round(x)), int(round(y))), col,
                                cv2.MARKER_CROSS, 9, 1)
-        if self.last_fit is not None and len(self.state.angles) == 2 and np.isfinite(self.state.angles[0]):
+        if self.last_fit is not None and len(self.state.angles) >= 1 and np.isfinite(self.state.angles[0]):
             theta, scale, dc = self.last_fit
             c = self.ref_pts.mean(0) + dc
-            L = max(15.0, 0.6 * self.yaw_radius)
+            L = max(15.0, 0.8 * self.draw_len)
             ax = np.array([np.cos(theta), np.sin(theta)]) * L
             cv2.line(image, (int(c[0] - ax[0]), int(c[1] - ax[1])),
                      (int(c[0] + ax[0]), int(c[1] + ax[1])), self.bgra, 1)
             cv2.arrowedLine(image, (int(self.ref_pts.mean(0)[0]), int(self.ref_pts.mean(0)[1])),
                             (int(c[0]), int(c[1])), (0, 200, 255), 1, tipLength=0.3)
-            txt = 'roll %+.1f  yaw %+.1f  %d/%d  q%.2f' % (
-                np.degrees(self.state.angles[0]), np.degrees(self.state.angles[1]),
+            txt = 'roll %+.1f deg  shift (%+.1f,%+.1f) px  %d/%d  q%.2f' % (
+                np.degrees(self.state.angles[0]),
+                self.state.gradients[0], self.state.gradients[1],
                 int(self.ok.sum()), len(self.ok), self.state.intensity)
-            if self.state.gradients and self.state.gradients[0] > self.nonrigid_px:
-                txt += '  NON-RIGID %.1fpx' % self.state.gradients[0]   # landmarks not moving together
-            cv2.putText(image, txt, (int(c[0]) + 8, int(c[1]) - 8), cv2.FONT_HERSHEY_DUPLEX,
-                        0.4, self.bgra)
+            if len(self.state.gradients) > 2 and self.state.gradients[2] > self.nonrigid_px:
+                txt += '  NON-RIGID %.1fpx' % self.state.gradients[2]   # landmarks not moving together
+            # Keep the readout inside the frame (the head is often near an edge).
+            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_DUPLEX, 0.4, 1)
+            tx = int(min(max(4, c[0] + 8), image.shape[1] - tw - 4))
+            ty = int(min(max(th + 4, c[1] - 8), image.shape[0] - 4))
+            cv2.putText(image, txt, (tx, ty), cv2.FONT_HERSHEY_DUPLEX, 0.4, self.bgra)
         elif len(self.ref_pts) < 2:
             cv2.putText(image, 'landmarks: place 2+ points (+lm)',
                         (int(self.ptHinge_i[0]) + 8, int(self.ptHinge_i[1]) - 8),

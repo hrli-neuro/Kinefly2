@@ -1,10 +1,13 @@
 """HDF5 fly-state + event logger (readable from Python and MATLAB: h5read).
 
-Layout, one row per merged state:
+Layout, one row per merged state (angles in RADIANS; the GUI displays degrees):
     /merged/seq, /merged/t_host, /merged/t_wall
     /<camera>/seq, t_camera, t_host, t_done
     /<camera>/<part>_angle, <part>_radius   for head, abdomen, left, right
     /<camera>/aux_intensity, /<camera>/aux_freq
+    /<camera>/head_dx, head_dy              head translation, px (landmarks tracker)
+    /<camera>/head_dx_corr, head_dy_corr    same, with the roll-induced shift removed
+    /<camera>/head_fit_residual, head_score landmark fit quality
 Events (from EventReceiver or log_event), one row per event:
     /events/t_host, /events/t_wall, /events/text
 
@@ -25,7 +28,7 @@ import numpy as np
 from .base import FlystateSink
 
 PARTS = ('head', 'abdomen', 'left', 'right')
-HEAD_EXTRA = ('yaw', 'dx', 'dy', 'fit_residual', 'score')
+HEAD_EXTRA = ('dx', 'dy', 'dx_corr', 'dy_corr', 'fit_residual', 'score')
 CHUNK = 1024
 
 
@@ -55,7 +58,7 @@ class Hdf5Logger(FlystateSink):
                 add('%s/%s_radius' % (cam, part))
             add('%s/aux_intensity' % cam)
             add('%s/aux_freq' % cam)
-            for col in HEAD_EXTRA:          # landmarks tracker: yaw etc. (NaN otherwise)
+            for col in HEAD_EXTRA:          # landmarks tracker only (NaN otherwise)
                 add('%s/head_%s' % (cam, col))
         add('events/t_host')
         add('events/t_wall')
@@ -94,12 +97,16 @@ class Hdf5Logger(FlystateSink):
             aux = cs.parts.get('aux')
             row['%s/aux_intensity' % cam] = aux.intensity if aux else math.nan
             row['%s/aux_freq' % cam] = aux.freq if aux else math.nan
+            # Landmark tracker extras: head translation in px (raw and with the
+            # roll-induced shift removed), fit quality. NaN for other trackers.
             hd = cs.parts.get('head')
-            lm = hd is not None and len(hd.angles) >= 2 and len(hd.radii) >= 2
-            row['%s/head_yaw' % cam] = hd.angles[1] if lm else math.nan
+            lm = (hd is not None and hd.kind == 'landmarks'
+                  and len(hd.radii) >= 2 and len(hd.gradients) >= 3)
             row['%s/head_dx' % cam] = hd.radii[0] if lm else math.nan
             row['%s/head_dy' % cam] = hd.radii[1] if lm else math.nan
-            row['%s/head_fit_residual' % cam] = hd.gradients[0] if (lm and hd.gradients) else math.nan
+            row['%s/head_dx_corr' % cam] = hd.gradients[0] if lm else math.nan
+            row['%s/head_dy_corr' % cam] = hd.gradients[1] if lm else math.nan
+            row['%s/head_fit_residual' % cam] = hd.gradients[2] if lm else math.nan
             row['%s/head_score' % cam] = hd.intensity if lm else math.nan
         try:
             self.queue.put_nowait(('state', row))

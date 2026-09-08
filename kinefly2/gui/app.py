@@ -307,8 +307,6 @@ class TrackerView:
             if lms:
                 paramsScaled['gui'][partname]['landmarks'] = [
                     {'x': p['x'] * scale, 'y': p['y'] * scale} for p in lms]
-            if paramsIn['gui'][partname].get('yaw_radius'):
-                paramsScaled['gui'][partname]['yaw_radius'] = paramsIn['gui'][partname]['yaw_radius'] * scale
         for partname in ['axis']:
             for tag in ['pt1', 'pt2']:
                 paramsScaled['gui'][partname][tag]['x'] = paramsIn['gui'][partname][tag]['x'] * scale
@@ -426,15 +424,16 @@ class TrackerView:
                         s += '%0.0fhz' % self.fly.aux.state.freq
                     cv2.putText(imgOutput, s, (x, y), self.fontface, self.scaleText, self.fly.aux.bgra)
 
+                # Angles are displayed in DEGREES (stored in radians, as in Kinefly).
                 if self.params['gui']['left']['track'] and self.params['gui']['right']['track']:
                     if len(self.fly.left.state.angles) > 0 and len(self.fly.right.state.angles) > 0:
-                        L = self.fly.left.state.angles[0]
-                        R = self.fly.right.state.angles[0]
+                        L = np.degrees(self.fly.left.state.angles[0])
+                        R = np.degrees(self.fly.right.state.angles[0])
                         y -= h_text + self.h_gap
-                        cv2.putText(imgOutput, 'L+R:% 7.4f' % (L + R), (x, y),
+                        cv2.putText(imgOutput, 'L+R:% 6.1f deg' % (L + R), (x, y),
                                     self.fontface, self.scaleText, ui.bgra_dict['blue'])
                         y -= h_text + self.h_gap
-                        cv2.putText(imgOutput, 'L-R:% 7.4f' % (L - R), (x, y),
+                        cv2.putText(imgOutput, 'L-R:% 6.1f deg' % (L - R), (x, y),
                                     self.fontface, self.scaleText, ui.bgra_dict['blue'])
 
                 for partname, label in (('right', 'R'), ('left', 'L'),
@@ -444,7 +443,7 @@ class TrackerView:
                         y -= h_text + self.h_gap
                         s = label + ':'
                         if len(part.state.angles) > 0:
-                            s += '% 7.4f' % part.state.angles[0]
+                            s += '% 6.1f deg' % np.degrees(part.state.angles[0])
                         cv2.putText(imgOutput, s, (x, y), self.fontface, self.scaleText, part.bgra)
 
             rec = self.rec_status

@@ -60,29 +60,30 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 196.0
+        x: 227.0
         y: 184.0
       radius_outer: 67.42403132415029
       radius_inner: 27.294688127912362
       angle_hi: 0.8727
       angle_lo: -0.9564522470221135
       landmarks:
-      - x: 240.0
-        y: 154.0
-      - x: 257.0
-        y: 204.0
-      - x: 232.0
-        y: 202.0
-      - x: 215.0
-        y: 166.0
-      yaw_radius: 0
+      - x: 235.6841278076172
+        y: 158.55368041992188
+      - x: 246.4214630126953
+        y: 199.72808837890625
+      - x: 208.83033752441406
+        y: 171.99891662597656
+      - x: 218.7435302734375
+        y: 204.422119140625
+      - x: 189.10137939453125
+        y: 185.4621124267578
     abdomen:
       track: false
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 80.17636519670486
-        y: 179.70066118240356
+        x: 165.0
+        y: 186.0
       radius_outer: 10.0
       radius_inner: 5.0
       angle_hi: 3.927
@@ -92,8 +93,8 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 74.82263802529008
-        y: 154.78299562770385
+        x: 76.0
+        y: 179.0
       radius_outer: 20.0
       radius_inner: 10.0
       angle_hi: -0.7854
@@ -103,8 +104,8 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 75.62127557164705
-        y: 204.7766179902603
+        x: 77.0
+        y: 206.0
       radius_outer: 20.0
       radius_inner: 10.0
       angle_hi: 2.3562
