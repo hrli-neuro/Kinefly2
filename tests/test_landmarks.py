@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 
+import cv2
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -242,6 +243,11 @@ def test_lever_px_produces_angles():
     assert abs(pitch_deg - 6.0) < 3.0, pitch_deg
 
 
+def draw_front_frame_ref():
+    from tests.make_synthetic_video import draw_front_frame
+    return draw_front_frame(0.0, 0.0)
+
+
 def _lm_tracker(view, axis_deg, pts, lever=None, hinge=(176.0, 230.0)):
     from kinefly2.tracking.tracker_landmarks import LandmarkTracker
     p = {'view': view,
@@ -253,6 +259,113 @@ def _lm_tracker(view, axis_deg, pts, lever=None, hinge=(176.0, 230.0)):
     if lever:
         p['head']['lever_px'] = lever
     return LandmarkTracker(name='head', params=p)
+
+
+def test_ventral_reports_only_yaw():
+    """A ventral camera measures yaw exactly and nothing else: its lever arm
+    (the head's dorsoventral depth) is too short, and those channels measured
+    noise (SNR 1.9 and 1.2 against the centroid floor on real video). So the
+    displacement channels are not reported at all, no axis is needed, and
+    lever_px is ignored."""
+    from tests.make_synthetic_video import draw_front_frame
+
+    img0, lm0 = draw_front_frame(0.0, 0.0)
+    pts = [lm0[k] for k in ('eye_l', 'eye_r', 'patch', 'ant_l', 'ant_r')]
+    img, _ = draw_front_frame(6.0, 10.0, 4.0)
+
+    def run_view(view, lever=None):
+        tr = _lm_tracker(view, -90.0, pts, lever=lever)
+        tr.update(1 / 90., img0, False)
+        tr.update(1 / 90., img, False)
+        return tr
+
+    tr = run_view('ventral')
+    e = tr.state.extra
+    assert np.isfinite(e['yaw']) and np.isclose(e['yaw'], tr.state.angles[0])
+    for name in ('roll', 'pitch', 'd_axial', 'd_lateral'):
+        assert not np.isfinite(e[name]), (name, e[name])
+    assert 'axis' not in tr.handles, sorted(tr.handles)
+    assert tr.axis is None
+    assert 'SET AXIS' not in ' '.join(tr.warnings), tr.warnings
+    # lever_px cannot resurrect them.
+    e2 = run_view('ventral', lever=33.0).state.extra
+    assert not np.isfinite(e2['pitch']) and not np.isfinite(e2['roll'])
+    # The readout says yaw and nothing about pitch/roll.
+    txt = tr.status_text()
+    assert 'yaw' in txt and 'pitch' not in txt and 'roll' not in txt, txt
+    print('ventral: yaw %+.2f deg, no axis handle, pitch/roll NaN even with '
+          'lever_px | "%s"' % (np.degrees(e['yaw']), txt.strip()))
+
+    # A frontal camera still reports all three.
+    ef = run_view('frontal', lever=33.0).state.extra
+    assert np.isfinite(ef['roll']) and np.isfinite(ef['pitch']) and np.isfinite(ef['yaw'])
+    print('frontal: roll %+.2f pitch %+.2f yaw %+.2f deg (all three)'
+          % (np.degrees(ef['roll']), np.degrees(ef['pitch']), np.degrees(ef['yaw'])))
+
+
+def test_set_lever_px_applies_without_touching_the_config():
+    """The per-fly constant reaches the tracker but must not be written to the
+    camera YAML, where the next fly would inherit it."""
+    import yaml as _yaml
+    from kinefly2.gui.app import TrackerView
+
+    d = tempfile.mkdtemp()
+    cfg = os.path.join(d, 'front.yaml')
+    img0, lm0 = draw_front_frame_ref()
+    make_config(cfg, [lm0[k] for k in ('eye_l', 'eye_r', 'patch', 'ant_l', 'ant_r')],
+                'landmarks')
+    view = TrackerView('front', cfg, use_gui=False)
+    before = open(cfg).read()
+
+    assert view.landmark_parts() == ['head'], view.landmark_parts()
+    assert view.fly.head.lever_px is None
+    applied = view.set_lever_px(48.2)
+    assert applied == ['head'] and view.fly.head.lever_px == 48.2
+
+    # Not persisted, and a GUI save must not persist it either.
+    assert open(cfg).read() == before, 'set_lever_px wrote the config'
+    view.save_params(save_reference=False)
+    on_disk = _yaml.safe_load(open(cfg)) or {}
+    assert 'lever_px' not in ((on_disk.get('tracker') or {}).get('head') or {}), \
+        'lever_px leaked into the camera config on save'
+
+    # Clearing it goes back to pixels.
+    view.set_lever_px(None)
+    assert view.fly.head.lever_px is None
+    print('set_lever_px: reaches the tracker, never reaches the YAML')
+
+    geo = view.landmark_geometry()
+    assert len(geo['head']) == 5 and len(geo['head'][0]) == 2, geo
+    print('landmark_geometry stamps %d points for staleness checking' % len(geo['head']))
+
+
+def test_untracked_parts_draw_nothing():
+    """A part switched off leaves no marks on the frame - not even its hinge."""
+    from kinefly2.tracking.fly import Fly
+    from kinefly2.gui.app import tracker_defaults
+    from tests.make_synthetic_video import draw_front_frame
+    import copy as _copy
+
+    img0, _ = draw_front_frame(0.0, 0.0)
+    base = tracker_defaults()
+    base['body_axis_deg'] = 90.0
+    for p in ('head', 'abdomen', 'left', 'right', 'aux'):
+        base['gui'][p]['track'] = False
+    fly = Fly(_copy.deepcopy(base))
+    fly.set_params(_copy.deepcopy(base))
+    blank = cv2.cvtColor(img0, cv2.COLOR_GRAY2BGR)
+    drawn = blank.copy()
+    fly.draw(drawn)
+    assert np.array_equal(blank, drawn), 'an untracked part still drew something'
+
+    on = _copy.deepcopy(base)
+    on['gui']['head']['track'] = True
+    fly2 = Fly(_copy.deepcopy(on))
+    fly2.set_params(_copy.deepcopy(on))
+    drawn2 = blank.copy()
+    fly2.draw(drawn2)
+    assert not np.array_equal(blank, drawn2), 'a tracked part drew nothing'
+    print('all parts off -> frame untouched; head on -> handles reappear')
 
 
 def test_view_decides_which_rotation_is_exact():
@@ -275,9 +388,13 @@ def test_view_decides_which_rotation_is_exact():
         assert np.isclose(e[exact], tr.state.angles[0]), (view, e[exact], tr.state.angles[0])
         for name in others:
             assert not np.isfinite(e[name]), (view, name, e[name])
-        assert np.isfinite(e['d_axial']) and np.isfinite(e['d_lateral'])
+        # Only a frontal view has displacement channels at all.
+        want = (view == 'frontal')
+        assert np.isfinite(e['d_axial']) == want, (view, e['d_axial'])
+        assert np.isfinite(e['d_lateral']) == want, (view, e['d_lateral'])
         print('view=%-8s exact channel = %-5s (= the in-plane angle, %+.2f deg); '
-              '%s NaN until lever_px' % (view, exact, np.degrees(e[exact]), '/'.join(others)))
+              '%s %s' % (view, exact, np.degrees(e[exact]), '/'.join(others),
+                         'NaN until lever_px' if want else 'not reported at all'))
 
 
 def test_axis_rotates_the_decomposition():
@@ -411,6 +528,9 @@ if __name__ == '__main__':
     test_ambiguous_layout_is_caught_and_contained()
     test_lever_px_produces_angles()
     test_view_decides_which_rotation_is_exact()
+    test_ventral_reports_only_yaw()
+    test_set_lever_px_applies_without_touching_the_config()
+    test_untracked_parts_draw_nothing()
     test_axis_rotates_the_decomposition()
     test_pitch_is_axial_in_both_views()
     test_parts_and_wings_are_independent()

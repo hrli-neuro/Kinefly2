@@ -7,8 +7,10 @@ Each camera view measures ONE head rotation exactly -- the in-plane one, which
 needs no rotation centre and no scale -- and sees the other two only end-on, as
 a shift of the head:
 
-    ventral camera (below):  yaw exact;  pitch = axial shift, roll = lateral
-    frontal camera (front):  roll exact; pitch = axial shift, yaw  = lateral
+    ventral camera (below):  yaw exact;  nothing else -- its lever arm (the
+                             dorsoventral depth) is too short, and the other two
+                             channels measured noise, so they are not reported
+    frontal camera (front):  roll exact; pitch = axial shift, yaw = lateral
 
 Both shifts scale by the SAME constant: the depth of the landmark centroid from
 the joint along that camera's optical axis, in pixels. Put the joint at the
@@ -118,6 +120,13 @@ def lever_inputs(log, camera, reference):
     """
     ref_name, ref = exact_channel(log, reference)
     own_name, _ = exact_channel(log, camera)
+    lateral = np.asarray(log.get('%s/head_d_lateral' % camera, []), dtype=float)
+    if lateral.size and not np.isfinite(lateral).any():
+        raise ValueError(
+            '%s has no lateral channel to calibrate: a ventral camera reports '
+            'only its exact in-plane angle, because its lever arm is too short '
+            'to measure the other two rotations. It is still a valid reference '
+            'for calibrating a frontal camera.' % camera)
     if ref_name is None:
         raise ValueError('%s has no exact angle: is it running a landmarks '
                          'tracker with a view set?' % reference)
@@ -125,8 +134,7 @@ def lever_inputs(log, camera, reference):
         raise ValueError('%s and %s measure the same rotation (%s) exactly, so '
                          'neither can calibrate the other. Use cameras with '
                          'different views.' % (camera, reference, ref_name))
-    shift = np.asarray(log['%s/head_d_lateral' % camera], dtype=float)
-    return shift, ref, ref_name
+    return lateral, ref, ref_name
 
 
 def _huber_lstsq(X, y, delta=1.5, iters=25):
@@ -237,10 +245,13 @@ def report(fit, ok=None, why=None):
         lines.append('resolution  = 1 px of shift is %.2f deg of yaw or pitch'
                      % (180 / math.pi / fit['lever_px']))
     if ok:
-        lines += ['', 'ACCEPTED. Put this in the head: section of the front camera YAML:',
-                  '    lever_px: %.1f' % fit['lever_px'],
-                  'Then head_yaw and head_pitch are logged in radians and the GUI',
-                  'shows degrees. dy_corr uses the same constant as dx_corr.']
+        lines += ['', 'ACCEPTED. This constant belongs to THIS fly. Put it in the',
+                  'experiment YAML (not the camera config, where the next fly would',
+                  'inherit it):', '',
+                  '    lever_px:',
+                  '      front: %.1f' % fit['lever_px'], '',
+                  'calibrate_fly --write <experiment.yaml> does it for you. Both',
+                  'displacement channels then become angles through this one number.']
     else:
         lines += ['', 'REJECTED -- do not adopt this constant:']
         lines += ['  * ' + w for w in why]

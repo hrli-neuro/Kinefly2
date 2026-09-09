@@ -197,6 +197,51 @@ Events are stamped on arrival with the fly-state clock (`t_host`) and
 wall-clock time (`t_wall`) and written to `/events` in the HDF5 and to the
 `.jsonl`. Events arriving while no recording is active are counted and dropped.
 
+#### 2.3.1 Per-fly calibration: `lever_px`
+
+The front camera's pitch and yaw channels are pixels until you supply one
+constant per fly. It depends on head size, mounting **and landmark placement**,
+so it lives in the **experiment YAML**, never in the camera config — a constant
+inherited from the previous fly would silently rescale every angle:
+
+```yaml
+lever_px:
+  front: 48.2      # px per radian, for THIS fly
+```
+
+Fit it from the fly's **own recording** — no stimulus needed. The reference is
+the bottom camera's exact yaw, and spontaneous head movement is usually plenty
+(the reference recording calibrated at r² = 0.96 from 32° of spontaneous yaw):
+
+```bash
+python -m kinefly2.apps.calibrate_fly <recording_dir> --write experiments/today.yaml
+```
+
+Calibrating from the fly's own recording — rather than a separate calibration
+block — guarantees the constant belongs to the landmark set the data was taken
+with. Nothing is lost by doing it afterwards: the pixel channels are always
+logged, so the first recording can be converted retrospectively and later
+blocks of the same fly get degrees live.
+
+`calibrate_fly` refuses to hand back a constant unless the fit passes its gates
+(reference yaw spanning ≥5°, r² ≥ 0.5, bootstrap CI under 20%), and it checks
+two things the numbers silently depend on:
+
+- **the landmarks**, compared against the camera config's current ones. Moving
+  one shifts the centroid and so the lever arm; a constant from before the move
+  does not describe the current setup, and `--write` is refused (`--force`
+  overrides).
+- **the axis** (§2.5.2), fitted from the data. If the config's `axis_deg` is
+  off the fitted line, pitch and yaw are probably swapped and it says so.
+
+At recording start the constant is applied to the trackers for that recording,
+so the GUI shows degrees and the log carries angles; it is stamped into
+`<run>_experiment.yaml` and into the HDF5 attributes together with the landmark
+positions, so a recording always says what its angles were derived from.
+
+Typical loop: mount fly → place landmarks → record → `calibrate_fly --write` →
+subsequent blocks report degrees.
+
 ### 2.4 Live browser dashboard
 
 ```bash
@@ -214,21 +259,26 @@ page has no external dependencies (works on an offline rig network).
 The `landmarks` tracker is the default for the head on **both** cameras. It
 places a few points on distinctive head features, matches each one by template
 matching every frame, and fits a rigid transform to the set. That fit gives one
-rotation **exactly** plus two displacement channels.
+rotation **exactly** — the in-plane one, which needs no rotation centre and no
+scale, so it does not matter where the hinge sits.
 
-**Which anatomical rotation each channel carries depends on the view**, set by
-`view:` at the top of the camera's `tracker:` section:
+**Which rotation that is depends on the view**, set by `view:` at the top of
+the camera's `tracker:` section:
 
-| `view` | camera | in-plane angle | along the part's axis | across it |
+| `view` | camera | exact | along the part's axis | across it |
 |---|---|---|---|---|
-| `ventral` | below the fly | **yaw** — exact | pitch | roll |
-| `frontal` | in front | **roll** — exact | pitch | yaw |
+| `ventral` | below the fly | **yaw** | — | — |
+| `frontal` | in front | **roll** | **pitch** | **yaw** |
 
-The in-plane angle needs no rotation centre and no scale, so it is exact
-wherever the hinge sits. The other two are seen end-on and appear only as a
-shift, scaled by that camera's lever arm — §2.5.3. Pitch is the axial channel
-in both views. Between them the two cameras measure **yaw and roll exactly**
-and **pitch twice over**.
+Between them the two cameras measure **yaw and roll exactly, and pitch once**.
+
+**A ventral camera reports yaw only.** Its lever arm is the head's
+dorsoventral depth from the neck, far shorter than the anterior–posterior depth
+a frontal camera gets, and the two displacement channels measured noise: SNR
+1.9 and 1.2 against a 0.28 px centroid noise floor, and the "roll" channel
+against the front camera's *exact* roll gave r = −0.15 — it was not measuring
+roll at all. So they are not reported. (`VIEW_CHANNELS` in
+`kinefly2/tracking/tracker_landmarks.py` records this; re-enabling is one edit.)
 
 Why not the hinge-based trackers (`edge`/`area`/`rotation`): they model a pure
 rotation about a fixed point, so any translation of the head corrupts the
@@ -245,8 +295,8 @@ fit is the wrong model for it.
 #### 2.5.1 Placing landmarks
 
 `+H` / `-H` add and remove landmarks on the head (one button pair per landmark
-part, so every part is reachable). Click `+H`, then click the feature. Aim for
-**4–6** points spread over the head. Landmarks are draggable handles.
+part). Click `+H`, then click the feature. Aim for **4–6** points spread over
+the head. Landmarks are draggable handles.
 
 Where they go depends on the view:
 
@@ -256,16 +306,21 @@ Where they go depends on the view:
 - **Frontal (front camera):** the edges of both eyes, the bright inter-ocular
   patch, the antenna bases.
 
-Three rules, each enforced with a warning on the status line:
+Four rules, each enforced with a warning on the status line:
 
 - **Put them on texture or an edge.** A point inside a uniform blob cannot be
   matched; it gets a red ring and is dropped.
+- **Keep them apart** — at least `template_px`, ideally more. `search_px` is
+  clamped automatically so the match window
+  (`search_px + template_px//2`) can never reach a neighbouring landmark and
+  steal its feature. `search 10->3 (landmarks 11px apart)` means the clamp got
+  severe and the points are crowded; spread them and it relaxes.
 - **Do not make the layout symmetric.** Four points on a rectangle map onto
   themselves under a 180° rotation, so the fit cannot tell 0° from 180° and
   flips. You get `AMBIGUOUS LAYOUT`. (A real case: four points 30 px apart,
   self-symmetric to 3.2 px, sent the roll past 170° in 2.5% of frames — while
   the fit *residual* went **down**, because a consistent swap is still
-  perfectly rigid. Spread the points unevenly.)
+  perfectly rigid.)
 - **Use 4 or more.** With two, a rigid fit has one redundant degree of freedom,
   so the residual cannot detect anything. Below four you get `only N landmarks`.
 
@@ -274,96 +329,68 @@ where the surface faces the light while the head turns, so they are not
 attached to the head. `NON-RIGID x px` appears when the set stops moving as one
 body, and `lmN BAD` names the single worst-fitting point (also circled amber).
 
-`search_px` is clamped automatically so the matcher can never reach a
-neighbouring landmark (`search 20->9` means it was reduced). That is what
-prevents the swap above; no need to tune it by hand.
-
 The posture when you place or move a landmark becomes the zero. Press `zero`
-later to re-zero without touching the landmarks (e.g. after a new fly settles);
-a `zeroed` event is written to the recording.
+later to re-zero without touching the landmarks; a `zeroed` event is written to
+the recording.
 
-#### 2.5.2 The axis handle
+Parts that are switched off draw **nothing** — not even their hinge — so a
+camera tracking only the head shows only the head. Toggle a part on in the
+toolbar to bring its handles back.
 
-Pitch is the displacement **along** the part's anatomical long axis and
-roll/yaw is the component **across** it. That needs a direction, and image
-x/y will not do — the fly sits at 3.9° in the bottom frame while the front head
-is upright. So each landmark part carries an `axis_deg`, shown in the GUI as a
-draggable arrow from the hinge labelled `+pitch`.
+#### 2.5.2 The axis handle (frontal cameras)
 
-Point it away from the joint along the part's long axis: **anterior** for a
-ventral head, **dorsal** for a frontal one. Only the direction matters; the
-arrow's length is cosmetic. If the part's hinge is on its actual joint the
-axis is inferred from hinge→landmark centroid; otherwise you get `SET AXIS`.
+Pitch is the displacement **along** one image direction and yaw the component
+**across** it. That needs a direction, and image x/y will not do — it depends
+on how the camera is mounted. So the frontal camera's head carries an
+`axis_deg`, drawn as a draggable arrow from the hinge labelled `+pitch`.
 
-The arrow also fixes the **sign** convention: positive pitch means the
-landmarks move along it. Check it once against a known head movement and add
-180° (or drag the arrow round) if the sign comes out inverted.
+**Point it along the fly's dorsoventral axis in the image** — not along the
+head's widest dimension, which is left–right in a frontal view. If the camera
+is mounted rotated, the dorsoventral axis may run horizontally in the frame;
+on the reference rig it does (`axis_deg` ≈ 173°). Getting it wrong silently
+swaps pitch and yaw, so don't guess: `calibrate_fly` (below) fits the axis from
+data and tells you if the config disagrees.
 
-#### 2.5.3 Pitch, and the other two rotations, are in pixels until calibrated
+Only the direction matters; the arrow's length is cosmetic. The arrow also
+fixes the sign: positive pitch means the landmarks move along it. A ventral
+camera has no axis handle, because it reports no displacement channels.
 
-Each camera's two displacement channels share one lever arm: the depth of the
-landmark centroid from the joint **along that camera's optical axis**. That
-depth cannot be measured from the view itself, so those channels are recorded
-in **pixels**. The exact in-plane angle is unaffected.
+#### 2.5.3 Pitch and yaw are in pixels until the fly is calibrated
 
-The two cameras calibrate each other — a camera's lateral channel carries
-exactly the rotation the other one measures exactly:
+The frontal camera's two displacement channels share one lever arm: the depth
+of the landmark centroid from the neck along the optical axis. That depth
+cannot be measured from the view itself, so the channels are recorded in
+**pixels**. The exact in-plane angle is unaffected.
 
-```bash
-jupyter lab notebooks/calibrate_lever.ipynb
-```
-
-`kinefly2/analysis/calibrate.py` pairs them up (`lever_inputs`), fits robustly
-(Huber), and **gates** the result: no constant is returned unless the reference
-spans ≥5°, r² ≥ 0.5 and the bootstrap CI is under 20%. A lever arm fitted from
-a fly that barely moved is noise with units that would silently rescale
-everything downstream. (The 2026-08-19 pair is correctly rejected: r² 0.03 and
-0.07.) A rotation stage works too, and is the only reference that also
-validates the cameras themselves.
-
-Then set it per camera:
-
-```yaml
-tracker:
-  view: ventral
-  head:
-    tracker: landmarks
-    lever_px: 31.0      # px per radian, from the notebook
-```
-
-All three rotations are then logged as angles and the GUI shows degrees;
-without it those two columns stay NaN rather than a guess. Expect the **front**
-camera to give the better pitch — its lever arm (anterior–posterior depth) is
-much longer than the bottom camera's (dorsoventral depth); on `cam1.mp4` the
-displacement channels are 7.25/3.21 px from the front against 0.53/0.72 px from
-below.
+The constant depends on head size, mounting **and landmark placement**, so it
+is **per fly** — see §2.3.1.
 
 #### 2.5.4 Outputs
 
-Per camera and part: `head_angle` (the in-plane angle, radians), `head_dx`,
-`head_dy` (raw shift, px), `head_dx_corr`, `head_dy_corr` (image axes, rotation
-removed), **`head_d_axial`** and **`head_d_lateral`** (the same shift along and
-across the part's axis, px), `head_fit_residual`, `head_score`,
-`head_roll_sigma`, and **`head_roll`, `head_pitch`, `head_yaw`** — the three
-rotations under fixed anatomical names, so analysis never needs to know the
-view. Exactly one of those three is always finite (the exact in-plane angle);
-the other two need `lever_px`.
+Per camera: `head_angle` (the in-plane angle, radians), `head_dx`, `head_dy`
+(raw shift, px), `head_dx_corr`, `head_dy_corr` (image axes, rotation removed),
+`head_d_axial` and `head_d_lateral` (along and across the axis, px — NaN on a
+ventral camera), `head_fit_residual`, `head_score`, `head_roll_sigma`, and
+**`head_roll`, `head_pitch`, `head_yaw`** — the three rotations under fixed
+anatomical names, so analysis never needs to know the view. Exactly one is
+always finite (the exact in-plane angle); on a frontal camera the other two
+fill in once `lever_px` is known, on a ventral camera they never do.
 
 In the camera window the readout sits bottom-left, wrapping when needed:
 
 ```
-HEAD: yaw    +2.4 deg +-1.0  pitch +0.1 roll +0.8 px  4/4  q0.98
-HEAD: roll   +3.6 deg +-1.1  pitch +3.6 yaw  +2.1 px  5/5  q0.94  search 20->7
+HEAD: yaw    +2.4 deg +-1.0  4/4  q0.98                       (ventral)
+HEAD: roll   +3.0 deg +-0.8  pitch  +2.4 yaw +10.5 deg  6/6  q0.86   (frontal, calibrated)
 ```
 
 The exact channel in degrees with `+-` its precision (`residual / (spread ×
-√N)` — more and wider-spread landmarks tighten it), then the two lever-arm
-channels in px (degrees once calibrated), how many landmarks matched, and `q`,
-the mean template match score (0–1). Warnings follow.
+√N)` — more and wider-spread landmarks tighten it), then, on a frontal camera,
+the two lever-arm channels in px (degrees once calibrated), how many landmarks
+matched, and `q`, the mean template match score (0–1). Warnings follow.
 
 Parameters (`tracker: head:`): `template_px`, `search_px` (auto-clamped),
-`min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px`, `lever_px`;
-geometry under `gui.head:` is `hinge`, `axis_deg`, `landmarks`. Cost ≈
+`min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px`; geometry under
+`gui.head:` is `hinge`, `axis_deg` (frontal only), `landmarks`. Cost ≈
 0.3–0.6 ms.
 
 ### 2.6 Timing validation
@@ -424,10 +451,10 @@ its own reference.
 |---|---|
 | `config/rig.yaml` | Rig topology: camera list, primary camera, ZMQ state port, command port. |
 | `config/camera_bottom.yaml` | Bottom view: `camera:` (capture settings) + `tracker:` (all tracking params, GUI-managed). |
-| `config/camera_front.yaml` | Same, for the front view. |
+| `config/camera_front.yaml` | Same, for the front view. Note it holds no `lever_px`: that is per fly, not per rig. |
 | `config/background_<name>.png` | Per-camera background image, written by `saveBG` or `--make-bg`. |
 | `config/reference_<name>.png` | Per-camera reference frame for `autoplace` (saved with the params). |
-| `experiments/*.yaml` | Per-recording settings: data root, genotype/fly/protocol, notes, video on/off, event port (section 2.3). |
+| `experiments/*.yaml` | Per-recording settings: data root, genotype/fly/protocol, notes, video on/off, event port (section 2.3), and **`lever_px`, the per-fly head calibration** (section 2.3.1). |
 | `kinefly2/gui/app.py` → `tracker_defaults()` | Defaults used for any tracker parameter missing from a camera YAML. |
 | `<data_root>/<date>/<name>/` | Recording folder (HDF5, videos, events, resolved settings, config snapshot). |
 | `tests/videos/*` | Auto-generated synthetic test fixtures — regenerated by the tests, don't tune configs here. |
@@ -478,7 +505,7 @@ apply). Anything missing falls back to `tracker_defaults()`.
 | `n_edges_max` | Max edges reported per wing by the edge tracker (1 = leading edge only). |
 | `rc_background` | Time constant (s) of the moving-average background model. |
 | `wingbeat_min/max` | Expected wingbeat frequency band (Hz) for the aux detector (it uses aliased spectra, so it works at 90 fps). |
-| `view` | `ventral` (camera below the fly) or `frontal` (in front). Decides which rotation each landmark channel carries — section 2.5. |
+| `view` | `ventral` (camera below the fly) or `frontal` (in front). Decides which rotation the landmark tracker measures exactly, and whether it reports displacement channels at all — section 2.5. |
 | `body_axis_deg` | The body frame the **wing** angles are reported in. Seeded once from the head/abdomen hinges, then frozen, so re-placing a hinge cannot silently shift every wing angle. Delete the key to re-seed it. |
 
 **Per part** (`head:`, `abdomen:`, `left:`, `right:`, `aux:`)
@@ -490,7 +517,7 @@ apply). Anything missing falls back to `tracker_defaults()`.
 | `threshold` | Edge-strength threshold (edge tracker); 0 = accept all. |
 | `feathering` | Softening of mask edges (0–1). |
 | `search_deg` | `rotation` tracker only: half-range of the rotation search in degrees (default 8). |
-| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px`, `lever_px` | `landmarks` tracker only: patch size; search radius (**auto-clamped** so the matcher cannot reach a neighbouring landmark — see 2.5.1); acceptance threshold; `rigid`/`similarity` fit; rotated re-matching for large rolls; output EMA; the fit residual above which the overlay warns `NON-RIGID`; and `lever_px`, the px-per-radian constant that turns the yaw and pitch channels into angles (unset = those columns stay NaN; fit it with `notebooks/calibrate_lever.ipynb`, see 2.5.2). Landmark positions and the axis live in `gui.<part>.landmarks` / `gui.<part>.axis_deg`. |
+| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px` | `landmarks` tracker only: patch size; search radius (**auto-clamped** so the matcher cannot reach a neighbouring landmark — see 2.5.1); acceptance threshold; `rigid`/`similarity` fit; rotated re-matching for large rolls; output EMA; and the fit residual above which the overlay warns `NON-RIGID`. Landmark positions and the axis live in `gui.<part>.landmarks` / `gui.<part>.axis_deg`. The px-per-radian constant `lever_px` is **not** here: it is per fly and lives in the experiment YAML (section 2.3.1). |
 | `polar_amplify` | Angular resolution multiplier of the polar transform (default 1.0). Raise (2–4) to resolve small rotations (e.g. head roll of a few degrees) at the cost of ~1–3 ms/frame for that part. |
 | `saturation_correction` | Compensate saturated pixels when background-subtracting. |
 
@@ -501,7 +528,7 @@ apply). Anything missing falls back to `tracker_defaults()`.
 | `track` | Whether this part is tracked (toolbar checkbox). |
 | `subtract_bg` | Background subtraction for this part (needs a saved background). |
 | `hinge: {x, y}` | Rotation center in image pixels (wing base, neck, abdomen base). The `landmarks` tracker does not need it for its angle, only for the roll-shift correction and as the axis origin. |
-| `axis_deg` | `landmarks` parts: the part's anatomical long axis in image degrees, pointing away from the joint. Draggable arrow in the GUI; splits the displacement into pitch (along) and roll/yaw (across) — section 2.5.2. |
+| `axis_deg` | Frontal `landmarks` parts: the image direction that counts as +pitch, along the fly's dorsoventral axis. Draggable arrow in the GUI; splits the displacement into pitch (along) and yaw (across) — section 2.5.2. Ventral parts have none. |
 | `radius_inner/outer` | Annulus radii (px) around the hinge that the tracker analyzes. |
 | `angle_lo/hi` | Angular window (radians, in the body frame: 0 points from abdomen hinge toward head hinge). |
 | `stabilize` | Image stabilization of the part (area tracker). |
@@ -522,7 +549,10 @@ shift along and across the part's own axis, px), `head_fit_residual`,
 `head_yaw`** (rad) — the three rotations under fixed anatomical names, so
 analysis need not know the view. Exactly one of those three is always finite
 (the exact in-plane angle: yaw for a ventral camera, roll for a frontal one);
-the other two need `lever_px` (section 2.5.3). All NaN for other trackers.
+on a frontal camera the other two fill in once `lever_px` is known (section
+2.3.1); on a ventral camera they stay NaN by design, as do its `head_d_axial`
+and `head_d_lateral` — the column set is kept uniform across cameras. All NaN
+for other trackers.
 Times are seconds (host clock is monotonic; `t_camera` is the device clock;
 `t_wall` is `time.time()`). Events: `/events/t_host`, `/events/t_wall`,
 `/events/text`. Readable with h5py or MATLAB's `h5read`.
@@ -602,11 +632,15 @@ tests/               synthetic-video generator + ground-truth and architecture t
 - [x] Landmark head tracking on **both** cameras with per-view channel naming
       (ventral -> yaw exact, frontal -> roll exact) and a per-part axis handle;
       wing angles decoupled from the head/abdomen hinges (`body_axis_deg`).
-- [ ] Fit each camera's `lever_px` and turn the pixel channels into angles -
-      needs a recording with real head movement (optomotor stimulus, or a
-      rotation stage). The two cameras calibrate each other;
-      `notebooks/calibrate_lever.ipynb` is ready and currently rejects the
-      2026-08-19 pair (r2 0.03 and 0.07).
+- [x] Ventral view reports yaw only - its pitch/roll channels measured noise
+      (SNR 1.9 and 1.2). Untracked parts draw nothing.
+- [x] Per-fly `lever_px` in the experiment YAML, fitted from the fly's own
+      recording by `calibrate_fly` with landmark-staleness and axis checks.
+      Head **pitch in degrees** on the front camera (r2 0.96; yaw cross-checks
+      against the bottom camera at r = 0.97).
+- [ ] Confirm the lever arm across several flies, and decide whether it can be
+      normalised by a size proxy (eye-to-eye distance in px) instead of being
+      re-fitted per fly.
 - [ ] Live PySpin validation at 90 Hz on the rig (pending the Linux machine
       and FLIR cameras).
 - [ ] Reiser LED-panel closed-loop sink (pending the arena). Verify the

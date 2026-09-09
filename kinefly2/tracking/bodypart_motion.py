@@ -379,12 +379,13 @@ class MotionTrackedBodypart(object):
     
 
     def draw_handles(self, image):
-        # Draw all handle points, or only just the hinge handle.
-        if (self.params['gui'][self.name]['track']):
-            for tagHandle,handle in self.handles.items():
-                handle.draw(image)
-        else:
-            tagHandle,handle = ('hinge',self.handles['hinge'])
+        # A part that is switched off draws nothing at all. Kinefly used to
+        # leave its bare hinge on screen, which on a camera that tracks only
+        # the head just litters the view with dots for parts it never uses.
+        # Toggling the part back on in the toolbar brings its handles back.
+        if not self.params['gui'][self.name]['track']:
+            return
+        for tagHandle, handle in self.handles.items():
             handle.draw(image)
 
     

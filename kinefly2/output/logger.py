@@ -9,16 +9,21 @@ Layout, one row per merged state (angles in RADIANS; the GUI displays degrees):
     /<camera>/head_dx_corr, head_dy_corr    same, with the in-plane rotation's own
                                             centroid shift removed, in IMAGE axes.
     /<camera>/head_d_axial, head_d_lateral  the same shift resolved along the part's own
-                                            long axis and across it (px). Axial is always
-                                            PITCH; across it is ROLL in a ventral view and
-                                            YAW in a frontal one.
+                                            long axis and across it (px). Axial is PITCH;
+                                            across it is YAW in a frontal view. A VENTRAL
+                                            camera leaves both NaN by design: its lever arm
+                                            (dorsoventral depth) is too short, and those
+                                            channels measured noise (SNR 1.9 and 1.2). The
+                                            column set is kept uniform across cameras, so
+                                            all-NaN here is expected, not a bug.
     /<camera>/head_roll, head_pitch, head_yaw
                                             the three rotations under fixed anatomical
                                             names, radians, so analysis need not know the
                                             view. Exactly one is always finite -- the exact
                                             in-plane angle (yaw for a ventral camera, roll
-                                            for a frontal one). The other two need
-                                            `lever_px` and are NaN until it is calibrated.
+                                            for a frontal one). A frontal camera fills the
+                                            other two once `lever_px` is calibrated; a
+                                            ventral camera never does.
     /<camera>/head_fit_residual, head_score landmark fit quality
     /<camera>/head_roll_sigma               roll uncertainty, radians (residual / (spread
                                             * sqrt(N))): the precision the current
@@ -52,7 +57,7 @@ CHUNK = 1024
 
 
 class Hdf5Logger(FlystateSink):
-    def __init__(self, path, cameras):
+    def __init__(self, path, cameras, metadata=None):
         self.path = str(path)
         self.cameras = list(cameras)
         self.queue = queue.Queue(maxsize=10000)
@@ -82,6 +87,14 @@ class Hdf5Logger(FlystateSink):
         add('events/t_host')
         add('events/t_wall')
         add('events/text', h5py.string_dtype())
+
+        # Provenance as file attributes: what the derived angles depend on.
+        # `landmarks` records the points each lever arm was meant for, so a
+        # constant reused after the landmarks moved can be caught.
+        if metadata:
+            import json
+            for key, value in metadata.items():
+                self.file.attrs[key] = json.dumps(value)
 
         self.thread = threading.Thread(target=self._writer, daemon=True,
                                        name='hdf5-logger')

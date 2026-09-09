@@ -77,9 +77,11 @@ def test_sessions_over_command_socket():
         except Kinefly2Error:
             pass
 
-        # Session 1
+        # Session 1. lever_px is per fly, so it travels with the start
+        # command and is applied to the trackers for this recording only.
         frames_before = pipelines['bottom'].n_frames
-        info = k.start(fly_id='017', protocol='YAMV', notes='first')
+        info = k.start(fly_id='017', protocol='YAMV', notes='first',
+                       lever_px={'front': 48.2})
         assert info['name'].endswith('_syn_017_YAMV'), info
         try:
             k.start(fly_id='018'); assert False, 'start while recording should fail'
@@ -96,12 +98,28 @@ def test_sessions_over_command_socket():
         assert set(z) == {'bottom', 'front'} and all('zeroed' in v for v in z.values()), z
         paths = k.snapshot()
         assert len(paths) == 2 and all(os.path.exists(p) for p in paths)
+        # It must never leak into the camera config: that is where the next
+        # fly would silently inherit it.
+        with open(VID_CFG) as f:
+            on_disk = yaml.safe_load(f) or {}
+        for part in ('head', 'abdomen', 'left', 'right'):
+            assert 'lever_px' not in ((on_disk.get('tracker') or {}).get(part) or {}), \
+                'lever_px leaked into the camera config'
         summary = k.stop()
         assert summary['events'] == 2, summary   # 'zeroed' events only come from run_rig's callback
         assert summary['video']['bottom']['written'] > 30 and summary['video']['bottom']['dropped'] == 0
         assert pipelines['bottom'].n_frames > frames_before
 
+        # lever_px round-trips: start command -> Experiment -> resolved YAML,
+        # and is stamped into the recording along with the landmark positions
+        # it belongs to, so a stale constant can be detected later.
+        with open(os.path.join(summary['output_dir'],
+                               summary['name'] + '_experiment.yaml')) as f:
+            resolved = yaml.safe_load(f)
+        assert resolved['lever_px'] == {'front': 48.2}, resolved.get('lever_px')
         with h5py.File(os.path.join(summary['output_dir'], summary['name'] + '_flystate.h5')) as f:
+            assert json.loads(f.attrs['lever_px']) == {'front': 48.2}, dict(f.attrs)
+            assert 'landmarks' in f.attrs, dict(f.attrs)
             assert f['merged/seq'].shape[0] == summary['rows']
             texts = [t.decode() if isinstance(t, bytes) else t for t in f['events/text'][:]]
             assert any('stim_on' in t for t in texts) and any('pushed' in t for t in texts), texts

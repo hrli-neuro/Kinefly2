@@ -15,3 +15,12 @@ record_video: true             # save raw MJPEG video per camera (~2-4 GB/hour/c
 video_quality: 95              # JPEG quality 1-100
 log_flystate: true             # HDF5 fly-state log
 events_port: 5557              # ZMQ PULL socket for stimulus-program events; null = off
+
+# Per-fly calibration: the constant that turns the front camera's displacement
+# channels into head pitch and yaw ANGLES. It depends on head size, mounting
+# and landmark placement, so it is different for every fly -- which is why it
+# lives here and not in the camera config. Fit it from the fly's own recording:
+#     python -m kinefly2.apps.calibrate_fly <recording_dir> --write <this file>
+# Leave it out and pitch/yaw stay in pixels; nothing is ever guessed.
+lever_px:
+  front: null                  # px per radian, e.g. 48.2

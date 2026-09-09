@@ -68,6 +68,46 @@ def test_refuses_uncorrelated():
     print('uncorrelated shift -> REJECTED: %s' % why[0])
 
 
+def _two_camera_log(n=3000, lever=90.0, seed=2):
+    """A log shaped like Hdf5Logger's: a ventral camera measuring yaw exactly
+    with no displacement channels, and a frontal one measuring roll exactly."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(n) / 60.0
+    yaw = np.radians(12.0) * np.sin(2 * np.pi * 0.3 * t)
+    nan = np.full(n, np.nan)
+    return {
+        'merged/t_host': t,
+        'bottom/head_yaw': yaw, 'bottom/head_roll': nan.copy(),
+        'bottom/head_pitch': nan.copy(),
+        'bottom/head_d_lateral': nan.copy(), 'bottom/head_d_axial': nan.copy(),
+        'front/head_roll': np.radians(5.0) * np.sin(2 * np.pi * 0.17 * t),
+        'front/head_yaw': nan.copy(), 'front/head_pitch': nan.copy(),
+        'front/head_d_lateral': lever * np.sin(yaw) + 1.2 * rng.standard_normal(n),
+        'front/head_d_axial': 3.0 * rng.standard_normal(n),
+    }
+
+
+def test_ventral_cannot_be_a_calibration_target():
+    """A ventral camera has no lateral channel, so nothing can calibrate it -
+    but it is still the reference that calibrates the frontal one."""
+    log = _two_camera_log()
+    shift, ref, name = calibrate.lever_inputs(log, 'front', reference='bottom')
+    assert name == 'yaw' and np.isfinite(shift).any()
+    fit = calibrate.fit_lever(shift, ref, n_boot=100)
+    ok, why = calibrate.check_fit(fit)
+    assert ok, why
+    assert abs(fit['lever_px'] - 90.0) / 90.0 < 0.05, fit['lever_px']
+    print('front calibrated by the bottom camera: %.1f px/rad (true 90.0)' % fit['lever_px'])
+
+    try:
+        calibrate.lever_inputs(log, 'bottom', reference='front')
+    except ValueError as e:
+        assert 'no lateral channel' in str(e), str(e)
+        print('bottom refused as a target: %s...' % str(e)[:58])
+    else:
+        raise AssertionError('a ventral camera must not be calibratable')
+
+
 def test_apply_lever_roundtrip():
     """The same constant converts both channels; small angles round-trip."""
     yaw = np.radians(np.linspace(-15, 15, 200))
@@ -95,6 +135,7 @@ if __name__ == '__main__':
     test_rejects_outliers()
     test_refuses_when_yaw_barely_moves()
     test_refuses_uncorrelated()
+    test_ventral_cannot_be_a_calibration_target()
     test_apply_lever_roundtrip()
     test_epoch_mask()
     print('OK')

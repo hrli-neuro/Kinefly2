@@ -54,9 +54,30 @@ class RecordingSession:
             exp.snapshot_configs(self.config_paths)
             exp.write_resolved()
 
+            # This fly's lever arm, applied to the trackers for the duration of
+            # the recording so the GUI shows degrees and the log carries angles.
+            # Cameras not named keep pixels; a ventral view ignores it.
+            applied = {}
+            for cam, view in self.views.items():
+                if hasattr(view, 'set_lever_px'):
+                    parts = view.set_lever_px((exp.lever_px or {}).get(cam))
+                    if (exp.lever_px or {}).get(cam) and parts:
+                        applied[cam] = exp.lever_px[cam]
+            if applied:
+                print('REC lever_px: %s' % ', '.join('%s=%.1f' % kv for kv in applied.items()))
+
             logger = None
             if exp.log_flystate:
-                logger = Hdf5Logger(exp.path('_flystate.h5'), cameras=list(self.pipelines))
+                # Stamp what the numbers depend on: the constant used, and the
+                # landmark positions it was meant for. A lever arm fitted for a
+                # different set of points is silently wrong, so calibrate_fly
+                # compares these before reusing one.
+                meta = {'lever_px': exp.lever_px or {}, 'landmarks': {}}
+                for cam, view in self.views.items():
+                    if hasattr(view, 'landmark_geometry'):
+                        meta['landmarks'][cam] = view.landmark_geometry()
+                logger = Hdf5Logger(exp.path('_flystate.h5'), cameras=list(self.pipelines),
+                                    metadata=meta)
                 self.merger.add_sink(logger)
             recorders = {}
             if exp.record_video:

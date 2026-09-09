@@ -213,6 +213,31 @@ class TrackerView:
 
     # --------------------------------------------------------------- landmarks
 
+    def set_lever_px(self, value):
+        """Apply this fly's lever arm to the camera's landmark parts.
+
+        Deliberately does NOT write the YAML: the constant belongs to the
+        experiment (one fly), not to the rig, so it must not persist into the
+        camera config where the next fly would inherit it. `lever_px` is not in
+        GUI_OWNED either, so a GUI save cannot leak it back out.
+        Views with no lever-arm channel (ventral) ignore it."""
+        applied = []
+        with self.lock:
+            for partname in self.landmark_parts():
+                self.params[partname]['lever_px'] = float(value) if value else None
+                applied.append(partname)
+            self.fly.set_params(self.scale_params(self.params, self.scale))
+        return applied
+
+    def landmark_geometry(self):
+        """Landmark positions per part, recorded with each dataset so a stale
+        lever arm (fitted for a different set of points) can be detected."""
+        out = {}
+        for partname in self.landmark_parts():
+            lms = self.params['gui'][partname].get('landmarks') or []
+            out[partname] = [[float(p['x']), float(p['y'])] for p in lms]
+        return out
+
     def landmark_parts(self):
         return [p for p in ('head', 'abdomen', 'left', 'right')
                 if self.params[p].get('tracker') == 'landmarks']

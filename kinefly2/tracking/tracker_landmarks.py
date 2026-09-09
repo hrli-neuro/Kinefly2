@@ -138,9 +138,17 @@ def safe_search_px(min_dist, template_px):
 
 
 # Which rotation each of the three channels carries, per camera view.
-# 'inplane' is the exact one; 'axial' and 'lateral' need the lever arm.
+# 'inplane' is the exact one; 'axial' and 'lateral' need the lever arm, and are
+# None where that lever arm is too short to measure anything.
+#
+# A ventral camera reports yaw only. Its lever arm is the head's dorsoventral
+# depth from the neck, which is far shorter than the anterior-posterior depth a
+# frontal camera gets. Measured on cam1.mp4 against a 0.28 px centroid noise
+# floor: d_axial std 0.54 px (SNR 1.93) and d_lateral std 0.33 px (SNR 1.18),
+# and the lateral channel against the front camera's EXACT roll gave r = -0.15
+# -- it was not measuring roll at all. Restore by naming the channels here.
 VIEW_CHANNELS = {
-    'ventral': {'inplane': 'yaw',  'axial': 'pitch', 'lateral': 'roll'},
+    'ventral': {'inplane': 'yaw',  'axial': None,    'lateral': None},
     'frontal': {'inplane': 'roll', 'axial': 'pitch', 'lateral': 'yaw'},
 }
 MIN_AXIS_PX = 8.0      # hinge->centroid shorter than this cannot define an axis
@@ -265,7 +273,13 @@ class LandmarkTracker(object):
         self.warnings = []
         safe = safe_search_px(self.layout['min_dist'], self.template_px)
         if safe is not None and self.search_px > safe:
-            self.warnings.append('search %d->%d' % (self.search_px, safe))
+            w = 'search %d->%d' % (self.search_px, safe)
+            # A clamp this tight leaves almost no room to follow the head
+            # between frames, and the cause is always the same: the landmarks
+            # are packed closer together than the templates are wide.
+            if safe < 5:
+                w += ' (landmarks %.0fpx apart)' % self.layout['min_dist']
+            self.warnings.append(w)
             self.search_px = safe
         if len(pts) >= 2 and self.layout['ambiguity'] < 0.25 * self.layout['rms_radius']:
             self.warnings.append('AMBIGUOUS LAYOUT')
@@ -274,8 +288,11 @@ class LandmarkTracker(object):
         # The part's long axis splits the displacement into pitch (along it)
         # and roll/yaw (across it). Prefer the explicit angle; fall back to
         # hinge->centroid, which is only meaningful with the hinge on the joint.
+        # A view with no lever-arm channels needs no axis at all.
         self.axis, self.lateral = None, None
-        if self.axis_deg is not None:
+        if not self.channels['axial']:
+            pass
+        elif self.axis_deg is not None:
             self.axis, self.lateral = axis_vectors(self.axis_deg)
         elif len(pts):
             v = pts.mean(0) - self.ptHinge_i
@@ -569,12 +586,12 @@ class LandmarkTracker(object):
         d_ax, d_lat = x.get('d_axial', np.nan), x.get('d_lateral', np.nan)
         if np.isfinite(d_ax):
             if self.lever_px:
-                s += '  %s%+5.1f %s%+5.1f deg' % (
+                s += '  %s %+5.1f %s %+5.1f deg' % (
                     ch['axial'], np.degrees(x.get(ch['axial'], np.nan)),
                     ch['lateral'], np.degrees(x.get(ch['lateral'], np.nan)))
             else:
-                s += '  %s%+5.1f %s%+5.1f px' % (ch['axial'], d_ax,
-                                                 ch['lateral'], d_lat)
+                s += '  %s %+5.1f %s %+5.1f px' % (ch['axial'], d_ax,
+                                                   ch['lateral'], d_lat)
         s += '  %d/%d  q%.2f' % (int(self.ok.sum()), len(self.ok), self.state.intensity)
         g = self.state.gradients
         if len(g) > 2 and np.isfinite(g[2]) and g[2] > self.nonrigid_px:
@@ -588,9 +605,9 @@ class LandmarkTracker(object):
 
     def draw(self, image):
         g = self.params['gui'][self.name]
-        self.handles['hinge'].draw(image)
         if not g['track']:
-            return
+            return          # a part that is off draws nothing, not even its hinge
+        self.handles['hinge'].draw(image)
         if self.axis is not None:
             # The long axis: displacement along it is pitch, across it is the
             # view's third rotation. Drawn so the convention is visible.

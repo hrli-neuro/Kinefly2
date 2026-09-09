@@ -269,8 +269,11 @@ class Fly(object):
             
             
     def draw(self, image):
-        # Draw line to indicate the body axis.
-        cv2.line(image, self.ptBodyIndicator1, self.ptBodyIndicator2, self.bgra_body, 1) # Draw a line longer than just head-to-abdomen.
+        # The body-axis line is the frame the wing and abdomen angles are
+        # reported in, so it is only meaningful when one of those is tracked.
+        # On a frontal camera tracking just the head it means nothing.
+        if any(self.params['gui'][p]['track'] for p in ('left', 'right', 'abdomen')):
+            cv2.line(image, self.ptBodyIndicator1, self.ptBodyIndicator2, self.bgra_body, 1)
                 
         self.axis.draw(image)
         self.head.draw(image)

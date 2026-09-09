@@ -1,5 +1,12 @@
 """Per-experiment settings: the one place that changes between recordings.
 
+This is also where each fly's `lever_px` lives -- the constant that turns the
+front camera's displacement channels into pitch and yaw angles. It is per fly
+because head size, mounting and landmark placement all change it, and it is
+deliberately NOT in the camera config so that one fly's constant can never be
+inherited by the next. Fit it from the fly's own recording with
+kinefly2.apps.calibrate_fly.
+
 An experiment YAML (see experiments/default.yaml) plus command-line overrides
 resolve to a recording name following the lab convention
     {date}_{genotype}_{fly_id}_{protocol}       e.g. 260819_XHCS_XHCS_017_YAMV
@@ -30,11 +37,14 @@ class Experiment:
     video_quality: int = 95       # MJPEG quality, 1-100
     log_flystate: bool = True
     events_port: int = 5557       # ZMQ PULL for stimulus events; null/0 = off
+    lever_px: dict = None         # {camera: px/rad} for THIS fly; see calibrate_fly.
+                                  # Absent -> pitch/yaw stay in px, never guessed.
     source_path: str = None       # the YAML this came from, if any
     output_dir: str = field(default=None, repr=False)
 
     FIELDS = ('data_root', 'date', 'genotype', 'fly_id', 'protocol', 'notes',
-              'record_video', 'video_quality', 'log_flystate', 'events_port')
+              'record_video', 'video_quality', 'log_flystate', 'events_port',
+              'lever_px')
 
     @classmethod
     def load(cls, path=None, overrides=None):
@@ -55,6 +65,14 @@ class Experiment:
         exp.fly_id = str(exp.fly_id)
         if not exp.events_port:
             exp.events_port = None
+        # The lever arm is per fly, so it lives here rather than in the camera
+        # config: a constant fitted for one fly must never leak into the next.
+        if isinstance(exp.lever_px, dict):
+            exp.lever_px = {str(k): float(v) for k, v in exp.lever_px.items()
+                            if v is not None}
+        elif exp.lever_px is not None:
+            raise ValueError('lever_px must map camera name -> px/rad, '
+                             'e.g. {front: 48.2}; got %r' % (exp.lever_px,))
         return exp
 
     @property

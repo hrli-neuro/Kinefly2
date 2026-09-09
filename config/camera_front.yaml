@@ -62,7 +62,7 @@ tracker:
       stabilize: false
       hinge:
         x: 221.0
-        y: 181.0
+        y: 182.0
       radius_outer: 67.42403132415029
       radius_inner: 27.294688127912362
       angle_hi: 0.8727
@@ -78,14 +78,16 @@ tracker:
         y: 177.96658325195312
       - x: 198.84994506835938
         y: 209.52896118164062
-      axis_deg: -90.0
+      - x: 211.0
+        y: 165.0
+      axis_deg: 173.5301800148268
     abdomen:
       track: false
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 165.0
-        y: 186.0
+        x: 162.0
+        y: 187.0
       radius_outer: 10.0
       radius_inner: 5.0
       angle_hi: 3.927
@@ -121,3 +123,4 @@ tracker:
       radius1: 30.0
       radius2: 20.0
       angle: 0.04395472524721401
+  body_axis_deg: -5.10216525235819
