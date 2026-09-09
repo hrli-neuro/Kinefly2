@@ -9,6 +9,7 @@ sinks (logging, ZMQ) must enqueue internally and return immediately.
 Sinks can be added/removed at runtime (recording sessions attach and detach
 the logger): the sink list is an immutable tuple swapped atomically.
 """
+import math
 import threading
 import time
 
@@ -21,7 +22,29 @@ class StateMerger:
         self.latest = {}
         self.sinks = ()
         self.seq = 0
+        self.stim = math.nan
+        self.stim_t_wall = math.nan
         self.lock = threading.Lock()
+
+    def set_stim(self, value):
+        """Set the stimulus code now in force -- the voltage the panels are
+        being driven with, which is what identifies the stimulus.
+
+        The value is HELD: every merged state from here on carries it until it
+        changes, so 'which stimulus was on at frame N' is a direct lookup
+        rather than something analysis has to reconstruct. The wall-clock time
+        of the change is kept alongside it, so update latency stays visible.
+
+        This is the seam an analog input would use: a DAQ reader calls exactly
+        this, and nothing downstream can tell the difference.
+        """
+        value = math.nan if value is None else float(value)
+        with self.lock:
+            changed = not (value == self.stim or (math.isnan(value) and math.isnan(self.stim)))
+            if changed:
+                self.stim = value
+                self.stim_t_wall = time.time()
+        return {'stim': self.stim, 'changed': changed, 't_wall': self.stim_t_wall}
 
     def add_sink(self, sink):
         with self.lock:
@@ -38,7 +61,8 @@ class StateMerger:
                 return None
             self.seq += 1
             merged = MergedFlyState(seq=self.seq, t_host=time.monotonic(),
-                                    cameras=dict(self.latest))
+                                    cameras=dict(self.latest),
+                                    stim=self.stim, stim_t_wall=self.stim_t_wall)
             sinks = self.sinks
         for sink in sinks:
             sink.handle(merged)

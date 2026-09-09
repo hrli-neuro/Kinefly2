@@ -2,6 +2,14 @@
 
 Layout, one row per merged state (angles in RADIANS; the GUI displays degrees):
     /merged/seq, /merged/t_host, /merged/t_wall
+    /merged/stim                            the stimulus code in force on this frame --
+                                            the voltage the panels are driven with, set by
+                                            the experiment script (Kinefly2Client.stim) and
+                                            HELD until it changes, so every row is labelled
+                                            with the stimulus that was on. NaN before the
+                                            first call.
+    /merged/stim_t_wall                     time.time() when that value last changed, so
+                                            stimulus update latency stays visible
     /<camera>/seq, t_camera, t_host, t_done
     /<camera>/<part>_angle, <part>_radius   for head, abdomen, left, right
     /<camera>/aux_intensity, /<camera>/aux_freq
@@ -74,6 +82,8 @@ class Hdf5Logger(FlystateSink):
         add('merged/seq')
         add('merged/t_host')
         add('merged/t_wall')
+        add('merged/stim')          # stimulus code in force on this frame
+        add('merged/stim_t_wall')   # when it last changed (time.time())
         for cam in self.cameras:
             for col in ('seq', 't_camera', 't_host', 't_done'):
                 add('%s/%s' % (cam, col))
@@ -104,7 +114,8 @@ class Hdf5Logger(FlystateSink):
         if self.closed:
             return
         row = {'merged/seq': merged.seq, 'merged/t_host': merged.t_host,
-               'merged/t_wall': time.time()}
+               'merged/t_wall': time.time(),
+               'merged/stim': merged.stim, 'merged/stim_t_wall': merged.stim_t_wall}
         for cam in self.cameras:
             cs = merged.cameras.get(cam)
             if cs is None:

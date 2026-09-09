@@ -88,6 +88,18 @@ class Kinefly2Client:
             text = json.dumps(text)
         return self.request(cmd='event', text=text)
 
+    def stim(self, value):
+        """Set the stimulus code now in force (the voltage driving the panels).
+
+        Held until changed, so every frame from now on is labelled with it and
+        `/merged/stim` in the recording says which stimulus was on when.
+        Call it whenever the pattern changes:
+
+            k.stim(2.5)       # pattern 2.5 V
+            k.stim(0)         # off
+        """
+        return self.request(cmd='stim', value=None if value is None else float(value))
+
     def snapshot(self):
         """Save a PNG of each camera's current frame; returns the paths."""
         return self.request(cmd='snapshot')['paths']

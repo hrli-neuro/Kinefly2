@@ -99,6 +99,63 @@ setup). Unchecked, every left/right handle is fully independent — use this
 when the two wings need different scanning regions. The setting persists in
 the YAML (`gui.symmetric`).
 
+### 2.1.1 Connecting the cameras
+
+Everything above runs from video files. To run from real cameras, the **only**
+thing Kinefly2 needs to identify one is its **serial number** — that is what
+binds a physical camera to `bottom` or `front` regardless of which port it is
+in or what order the two enumerate. Never rely on index order for a two-camera
+rig; plug the cameras in the other way round and the views would swap.
+
+Find the serials on the rig:
+
+```bash
+python -m kinefly2.apps.list_cameras
+```
+
+It prints each camera's serial, model, link speed, resolution and maximum frame
+rate at the current ROI, followed by a ready-to-paste `camera:` block. Put each
+block into the matching camera YAML in place of the `kind: video` lines (both
+shipped configs carry the block already, commented out):
+
+```yaml
+camera:
+  kind: pyspin
+  serial: "22334455"      # binds THIS camera to 'bottom' whatever port it is in
+  fps: 90
+  exposure_us: 2000       # must be < 1/fps; set it manually
+  gain_db: 0
+  roi: {width: 512, height: 512}    # centred unless offset_x/offset_y are given
+  trigger: {mode: primary}          # the other camera gets {mode: secondary}
+```
+
+Nothing else changes. `make_source` swaps the frame source and the tracking,
+GUI, recording and ZMQ paths never know the difference — which is also why the
+whole system can be developed against video files.
+
+Two settings matter more than they look:
+
+- **`exposure_us`** must be shorter than the frame interval (11111 µs at 90 Hz),
+  and must be set *manually*. Auto-exposure varies the exposure time frame to
+  frame, which changes apparent brightness and blur and so moves the tracked
+  edges.
+- **`roi`** is usually what actually buys the frame rate: less to move over the
+  bus. Crop to the fly and check the "max fps" line from `list_cameras`.
+- **`trigger`** puts both cameras on one frame clock — one `primary` strobing
+  its exposure on an output line, the other `secondary` following it. Free-
+  running cameras drift, so a frame from one can sit up to a frame away from
+  the other's. That matters here specifically because the two views are
+  compared directly: the front camera's lever arm is calibrated against the
+  bottom camera's angle (section 2.3.1), and the r = 0.97 that calibration
+  achieved came from two views that *were* frame-synchronised. Wire the
+  primary's strobe line to the secondary's trigger input per FLIR's GPIO
+  pinout for your model.
+
+> The camera code paths cannot be exercised without the hardware, so ROI,
+> binning and trigger are implemented but **untested on a real camera**. The
+> config plumbing is covered by tests; the rest wants a careful first run with
+> `list_cameras` and a short recording before trusting a session to it.
+
 ### 2.2 Real time on the rig: leave it on, record on demand
 
 ```bash
@@ -249,10 +306,57 @@ python -m kinefly2.apps.dashboard                       # tracker on this machin
 python -m kinefly2.apps.dashboard --zmq tcp://<rig-ip>:5556 --port 8000
 ```
 
-Open `http://<machine>:8000` from any computer on the network for live
-traces of L, R, L−R, head yaw/roll and wingbeat frequency. It is a separate
-process reading the ZMQ stream, so it adds no load to the tracker, and the
-page has no external dependencies (works on an offline rig network).
+Open `http://<machine>:8000` from any computer on the network. It is a separate
+process reading the ZMQ stream, so it adds no load to the tracker, and the page
+has no external dependencies (it works on an offline rig network).
+
+It behaves like a chart recorder rather than an auto-ranging plot: **each trace
+holds a fixed y range**, so the picture stays still and a value now is
+comparable with the same value a minute ago. Autoscaling every redraw hides
+small changes by normalising them away.
+
+| control | what it does |
+|---|---|
+| `window` | Visible span — 5 / 10 / 30 / 60 s, always ending at now. |
+| `fit` (per trace) | Set this trace's range from what is currently on screen, once. |
+| `+` `−` `▲` `▼` | Zoom and pan that trace's y axis. |
+| min/max boxes | Type an exact range. |
+| `×` | Hide the trace; it reappears as a button below the plots. |
+| drag the title | Reorder panels. |
+| `Pause` | Freeze the display without losing the stream; `Live` resumes. |
+| hover | Cursor line with every trace's value at that instant. |
+| `Fit all` / `Reset layout` | Autofit everything, or go back to defaults. |
+
+Ranges, order and hidden traces are remembered in the browser, so a reload
+brings back your working setup. Panels with no data are hidden automatically
+on first connect, so running only the bottom camera does not leave half the
+page empty.
+
+Traces are drawn with **min/max decimation** — one vertical segment per pixel
+column — so a 60 s window at 90 Hz (5400 points) draws quickly and shows the
+true envelope instead of an aliased subsample. A brief spike is never skipped.
+
+Channel names come from the tracker's own `extra`, so they mean what they say
+whatever the camera view: a ventral camera shows only its exact yaw, and a
+frontal camera shows roll plus pitch and yaw — in **degrees** once that fly's
+`lever_px` is set (section 2.3.1) and in **pixels** before that. Reading the
+raw image-axis displacement instead would mislabel both channels on any camera
+whose axis is not aligned with the frame.
+
+**Stimulus row.** `/merged/stim` is drawn as a step trace. Set it from the
+experiment script whenever the pattern changes:
+
+```python
+k.stim(2.5)      # the voltage code now driving the panels
+k.stim(0)        # off
+```
+
+The value is **held** until it changes, so every frame is labelled with the
+stimulus that was on, and `/merged/stim` in the recording answers "which
+stimulus was on at frame N" as a direct lookup. `/merged/stim_t_wall` records
+when it last changed, so update latency stays visible. `StateMerger.set_stim`
+is the seam an analog input would use — a DAQ reader calls exactly that, and
+nothing downstream can tell the difference.
 
 ### 2.5 Head tracking with landmarks (both cameras)
 
@@ -328,6 +432,25 @@ Four rules, each enforced with a warning on the status line:
 where the surface faces the light while the head turns, so they are not
 attached to the head. `NON-RIGID x px` appears when the set stops moving as one
 body, and `lmN BAD` names the single worst-fitting point (also circled amber).
+
+**What actually sets the precision.** Matching is already sub-pixel: a 3-point
+parabola is fitted to the correlation peak in x and y, and the matched
+positions land uniformly across the pixel (0.071–0.124 against an ideal 0.100),
+so there is no pixel-locking. But it is not the limiting factor — turning it
+off costs only 12% on the bottom camera and 1% on the front. A more elaborate
+interpolator would buy correspondingly little. What does move the number:
+
+| lever | measured effect |
+|---|---|
+| **placement** | per-landmark residuals span 0.61 → 1.79 px across one 5-point set |
+| **`template_px`** | 25 → 33 on the front camera: residual 1.58 → 1.21 px (23%) |
+| rotation | 1.19 px at \|roll\| < 3° against 1.73 px at \|roll\| > 10° |
+
+So: watch `lmN BAD` and move the offender, and size `template_px` to the head
+rather than leaving the default. A bigger template needs proportionally more
+spacing, because `search_px` is clamped against the gap between landmarks —
+crowd them and you get `search 10->3 (landmarks 11px apart)` and lose the room
+to follow fast movement. Spread first, then enlarge.
 
 The posture when you place or move a landmark becomes the zero. Press `zero`
 later to re-zero without touching the landmarks; a `zeroed` event is written to
@@ -450,7 +573,7 @@ its own reference.
 | File | Contents |
 |---|---|
 | `config/rig.yaml` | Rig topology: camera list, primary camera, ZMQ state port, command port. |
-| `config/camera_bottom.yaml` | Bottom view: `camera:` (capture settings) + `tracker:` (all tracking params, GUI-managed). |
+| `config/camera_bottom.yaml` | Bottom view: `camera:` (capture settings — video file or live camera, section 2.1.1) + `tracker:` (all tracking params, GUI-managed). Only the `tracker:` block is rewritten by the GUI, so comments in `camera:` survive. |
 | `config/camera_front.yaml` | Same, for the front view. Note it holds no `lever_px`: that is per fly, not per rig. |
 | `config/background_<name>.png` | Per-camera background image, written by `saveBG` or `--make-bg`. |
 | `config/reference_<name>.png` | Per-camera reference frame for `autoplace` (saved with the params). |
@@ -603,7 +726,7 @@ kinefly2/camera/     FrameSource abstraction: pyspin_source, video_source, openc
 kinefly2/core/       CameraPipeline (per-camera thread), StateMerger, flystate dataclasses
 kinefly2/output/     FlystateSink interface, ZMQ publisher, HDF5 logger; future panels driver
 kinefly2/gui/        TrackerView: per-camera window, toolbar, draggable handles, YAML save
-kinefly2/apps/       run_offline, run_rig, ctl (command-line control), check_latency, dashboard
+kinefly2/apps/       run_offline, run_rig, ctl, list_cameras, calibrate_fly, check_latency, dashboard
 kinefly2/client.py   Python client for experiment scripts (start/stop/event/status/states)
 kinefly2/core/session.py   recording sessions (attach/detach logger + video at runtime)
 kinefly2/gui/autoplace.py  automatic region placement (registration / silhouette)
@@ -638,6 +761,13 @@ tests/               synthetic-video generator + ground-truth and architecture t
       recording by `calibrate_fly` with landmark-staleness and axis checks.
       Head **pitch in degrees** on the front camera (r2 0.96; yaw cross-checks
       against the bottom camera at r = 0.97).
+- [x] Camera hookup: `list_cameras` prints each camera's serial and a pasteable
+      config block; ROI, binning and hardware trigger in the camera YAML.
+- [x] Stimulus code channel (`/merged/stim`), held per frame, drawn live.
+- [x] Chart-recorder dashboard: fixed per-trace ranges, adjustable window,
+      min/max decimation, pause with cursor, reorder/hide, saved layout.
+- [ ] First run against real FLIR cameras: verify ROI and the primary/secondary
+      trigger wiring, and confirm 90 Hz on both views at the chosen ROI.
 - [ ] Confirm the lever arm across several flies, and decide whether it can be
       normalised by a size proxy (eye-to-eye distance in px) instead of being
       re-fitted per fly.

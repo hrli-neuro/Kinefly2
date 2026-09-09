@@ -61,7 +61,11 @@ def make_source(config):
         return PySpinSource(serial=config.get('serial'),
                             fps=config.get('fps', 90.0),
                             exposure_us=config.get('exposure_us'),
-                            gain_db=config.get('gain_db'))
+                            gain_db=config.get('gain_db'),
+                            roi=config.get('roi'),
+                            binning=config.get('binning'),
+                            pixel_format=config.get('pixel_format', 'Mono8'),
+                            trigger=config.get('trigger'))
     else:
         raise ValueError('Unknown camera kind: %r' % kind)
 

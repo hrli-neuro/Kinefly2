@@ -98,6 +98,16 @@ def test_sessions_over_command_socket():
         assert set(z) == {'bottom', 'front'} and all('zeroed' in v for v in z.values()), z
         paths = k.snapshot()
         assert len(paths) == 2 and all(os.path.exists(p) for p in paths)
+        # The stimulus code: held from the moment it is set, so every frame
+        # from here on is labelled with the stimulus that was on.
+        r = k.stim(2.5)
+        assert r['stim'] == 2.5 and r['changed'] is True, r
+        assert k.stim(2.5)['changed'] is False, 'setting the same value is not a change'
+        time.sleep(0.4)
+        r = k.stim(7.0)
+        assert r['stim'] == 7.0 and r['changed'] is True, r
+        time.sleep(0.4)
+
         # It must never leak into the camera config: that is where the next
         # fly would silently inherit it.
         with open(VID_CFG) as f:
@@ -119,6 +129,12 @@ def test_sessions_over_command_socket():
         assert resolved['lever_px'] == {'front': 48.2}, resolved.get('lever_px')
         with h5py.File(os.path.join(summary['output_dir'], summary['name'] + '_flystate.h5')) as f:
             assert json.loads(f.attrs['lever_px']) == {'front': 48.2}, dict(f.attrs)
+            stim = f['merged/stim'][:]
+            seen = set(np.unique(stim[np.isfinite(stim)]))
+            assert {2.5, 7.0} <= seen, seen        # both steps landed in the log
+            held = np.isfinite(stim).sum()
+            assert held > 10, 'the value must be held on every frame, not just at the change'
+            assert np.isfinite(f['merged/stim_t_wall'][:]).any()
             assert 'landmarks' in f.attrs, dict(f.attrs)
             assert f['merged/seq'].shape[0] == summary['rows']
             texts = [t.decode() if isinstance(t, bytes) else t for t in f['events/text'][:]]

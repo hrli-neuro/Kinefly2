@@ -82,6 +82,8 @@ class MergedFlyState:
     seq: int
     t_host: float                                # Host monotonic time of the merge.
     cameras: dict = field(default_factory=dict)  # camera name -> CameraState
+    stim: float = math.nan                       # Stimulus code (see StateMerger.set_stim).
+    stim_t_wall: float = math.nan                # time.time() when it last changed.
 
     def part(self, camera, name):
         cs = self.cameras.get(camera)
@@ -91,4 +93,5 @@ class MergedFlyState:
 
     def to_dict(self):
         return {'seq': self.seq, 't_host': self.t_host,
+                'stim': self.stim, 'stim_t_wall': self.stim_t_wall,
                 'cameras': {k: v.to_dict() for k, v in self.cameras.items()}}

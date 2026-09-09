@@ -201,6 +201,13 @@ class RecordingSession:
                     if req.get('camera') in (None, name):
                         out[name] = view.zero_all()
                 return {'ok': True, 'zeroed': out}
+            elif cmd == 'stim':
+                # The stimulus code now in force. Held until it changes, so
+                # every frame carries the value that was on.
+                if 'value' not in req:
+                    return {'ok': False, 'error': "stim needs 'value'"}
+                out = self.merger.set_stim(req.get('value'))
+                return {'ok': True, **out, 'recording': self.recording}
             elif cmd == 'ping':
                 return {'ok': True, 'time': time.time()}
             else:

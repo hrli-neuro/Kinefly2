@@ -1,9 +1,18 @@
 name: bottom
 camera:
   kind: video
-  path: /Users/haoruli/Desktop/260819_XHCS_XHCS_017_YAMV_cam1.mp4
+  path: /Users/haoruli/Desktop/260819_XHCS_XHCS_012_YAMV_cam1.mp4
   pace: false
   loop: false
+  # --- Live FLIR camera: comment out the four lines above, uncomment these.
+  #     Find the serial with:  python -m kinefly2.apps.list_cameras
+  # kind: pyspin
+  # serial: "00000000"      # binds THIS camera to 'bottom' whatever port it is in
+  # fps: 90
+  # exposure_us: 2000       # set manually; auto-exposure varies frame to frame
+  # gain_db: 0
+  # roi: {width: 512, height: 512}   # crop to reach the frame rate; centred by default
+  # trigger: {mode: primary}   # share one frame clock with the other camera
 tracker:
   invertcolor: true
   view: ventral
@@ -69,14 +78,14 @@ tracker:
       angle_hi: 1.0330055122315223
       angle_lo: -1.3670431226188864
       landmarks:
-      - x: 302.0
-        y: 161.0
-      - x: 284.05609130859375
-        y: 186.09002685546875
-      - x: 285.0609130859375
-        y: 143.90773010253906
-      - x: 302.0
-        y: 172.0
+      - x: 272.0
+        y: 156.0
+      - x: 263.0
+        y: 144.0
+      - x: 274.0
+        y: 168.0
+      - x: 262.0
+        y: 185.0
     abdomen:
       track: false
       subtract_bg: false
@@ -93,8 +102,8 @@ tracker:
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 242.0
-        y: 136.0
+        x: 213.0
+        y: 141.0
       radius_outer: 107.07940978544848
       radius_inner: 72.55714687158297
       angle_hi: -0.2640481519209077
@@ -104,12 +113,12 @@ tracker:
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 240.0
-        y: 191.0
-      radius_outer: 112.8716084761797
-      radius_inner: 72.55714687158297
-      angle_hi: 1.2663078072664193
-      angle_lo: 0.05674518759790281
+        x: 218.0
+        y: 197.0
+      radius_outer: 123.1665539016173
+      radius_inner: 76.47875521999558
+      angle_hi: 0.9850474546045005
+      angle_lo: 0.06921114912200643
     aux:
       track: false
       subtract_bg: false

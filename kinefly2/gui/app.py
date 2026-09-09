@@ -370,8 +370,7 @@ class TrackerView:
                 tracker[key] = copy.deepcopy(self.params[key])
         on_disk['tracker'] = tracker
         self.config = on_disk
-        with open(self.config_path, 'w') as f:
-            yaml.safe_dump(on_disk, f, sort_keys=False)
+        self._write_tracker_section(on_disk, tracker)
         # Tell the user when the file now asks for a different tracker type
         # than the one running (needs a restart to take effect).
         for part in ('head', 'abdomen', 'left', 'right'):
@@ -383,6 +382,29 @@ class TrackerView:
         # The frame the regions were tuned on becomes the autoplace reference.
         if save_reference and self.imgUnscaled is not None:
             cv2.imwrite(self.filenameReference, self.imgUnscaled)
+
+    def _write_tracker_section(self, on_disk, tracker):
+        """Rewrite only the `tracker:` block, leaving everything before it as
+        text. `name:` and `camera:` are hand-edited and carry comments -- the
+        camera section documents how to switch from a video file to a live
+        camera -- and dumping the whole document would silently delete all of
+        it on the next mouse-up."""
+        body = yaml.safe_dump({'tracker': tracker}, sort_keys=False)
+        try:
+            with open(self.config_path) as f:
+                text = f.read()
+            if text.startswith('tracker:'):
+                head = ''
+            else:
+                head = text[:text.index('\ntracker:') + 1]
+            with open(self.config_path, 'w') as f:
+                f.write(head + body)
+            return
+        except (OSError, ValueError):
+            pass
+        # Unexpected layout (no top-level `tracker:`): rewrite the whole file.
+        with open(self.config_path, 'w') as f:
+            yaml.safe_dump(on_disk, f, sort_keys=False)
 
     # ---------------------------------------------------------------- tracking
 
