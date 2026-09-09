@@ -60,6 +60,10 @@ class AxisTracker:
 
 
     def get_bodyangle_i(self):
+        # Frozen in the config so a hinge move cannot shift the wing angles.
+        frozen = self.params.get('body_axis_deg')
+        if frozen is not None:
+            return float(np.radians(frozen))
         angle_i = imageprocessing.get_angle_from_points_i(self.pt1_i, self.pt2_i)
         #angleBody_i  = (angle_i + np.pi) % (2.0*np.pi) - np.pi
         angleBody_i  = float(angle_i)

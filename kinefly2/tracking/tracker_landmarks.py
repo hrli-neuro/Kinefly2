@@ -1,33 +1,48 @@
-"""LandmarkTracker: head roll (angle) and head translation (pixels) from
-user-placed landmarks.
+"""LandmarkTracker: one exact rotation angle plus two displacement channels,
+from user-placed landmarks. Used for the head in both camera views.
 
-The user places a few landmarks on distinctive head features (eye edges, the
-bright inter-ocular patch, antenna bases). Each frame, every landmark is
-located by normalized template matching of its reference patch inside a
-small search window; a rigid (or similarity) fit of the reference landmark
-positions onto the measured ones decomposes the head motion:
+The user places a few landmarks on distinctive features (eye edges, the bright
+inter-ocular patch, antenna bases). Each frame every landmark is located by
+normalized template matching of its reference patch inside a small search
+window; a rigid (or similarity) fit of the reference positions onto the
+measured ones decomposes the motion:
 
-    rotation of the fit    -> ROLL, an angle (in-plane rotation; needs no
-                              rotation center, so it is exact regardless of
-                              where the hinge is placed)
-    translation of the fit -> the head's DISPLACEMENT in pixels, after removing
-                              the centroid shift that a roll about the neck
-                              hinge produces.
+    rotation of the fit    -> the IN-PLANE angle. Exact: it needs no rotation
+                              centre, so it does not matter where the hinge is.
+    translation of the fit -> the DISPLACEMENT in pixels, after removing the
+                              centroid shift that an in-plane rotation about
+                              the hinge produces.
 
-From a frontal view the two displacement components are the remaining two head
-rotations, each seen end-on:
+Which anatomical rotation each channel carries depends on the VIEW. The two
+displacement components are the two rotations seen end-on, decomposed along the
+part's own long axis (`axis_deg`, pointing away from its joint) rather than
+along image x/y -- the fly is rarely square to the frame:
 
-    horizontal (dx_corr) -> YAW   (rotation about the dorsoventral axis)
-    vertical   (dy_corr) -> PITCH (rotation about the lateral axis)
+    view: ventral (camera below the fly)
+        in-plane angle -> YAW    (about the dorsoventral axis)  EXACT
+        along the axis -> PITCH  (about the lateral axis)
+        perpendicular  -> ROLL   (about the anterior-posterior axis)
 
-Both scale by the SAME lever arm: the head's anterior-posterior depth from the
-neck joint. That depth points along the optical axis, so a frontal view cannot
-measure it and these stay in PIXELS, uncalibrated. One constant converts both:
-fit it post hoc against the bottom camera's head yaw angle (which is a true
-in-plane rotation there, so it needs no lever arm) with
-kinefly2.analysis.calibrate. Set it as `lever_px` in the head's config section
-and the yaw/pitch angles appear in the log and the GUI; leave it unset and they
-are NaN rather than a guess.
+    view: frontal (camera in front of the fly)
+        in-plane angle -> ROLL   (about the anterior-posterior axis)  EXACT
+        along the axis -> PITCH  (about the lateral axis)
+        perpendicular  -> YAW    (about the dorsoventral axis)
+
+Pitch is the axial channel in both views. Each view measures ONE rotation
+exactly -- the in-plane one, which needs no rotation centre and no scale -- and
+the other two only through a lever arm: the depth of the landmark centroid from
+the joint along the optical axis. That depth cannot be measured from the view
+itself, so those two channels stay in PIXELS. One constant converts both; fit
+it post hoc with kinefly2.analysis.calibrate against the OTHER camera's exact
+in-plane angle. Set it as `lever_px` in the part's config section and the
+angles appear in the log and the GUI; leave it unset and they are NaN rather
+than a guess.
+
+Sign: positive pitch = the landmarks move along +axis (away from the joint);
+positive roll/yaw = they move along +perpendicular, which is +axis rotated 90
+degrees clockwise on screen. Which physical direction that is depends on which
+side of the joint the landmarks sit, so check it once against a known head
+movement and add 180 to `axis_deg` if the sign is inverted.
 
 Unlike the hinge-based trackers (edge/area/rotation) this needs no rotation
 center and is not corrupted by combined roll+yaw. Blob-like features also
@@ -39,13 +54,17 @@ Outputs (like the other trackers: angles in radians; the GUI displays degrees):
     state.gradients = [dx_corr, dy_corr, residual]  roll-removed shift, px; fit residual, px
     state.intensity = mean match score              0..1 quality
     state.kind      = 'landmarks'
-    state.extra     = {roll_sigma, n_ok, worst_lm, warnings, yaw, pitch}
+    state.extra     = {roll, pitch, yaw (rad; only the in-plane one is finite
+                       until lever_px is set), d_axial, d_lateral (px),
+                       roll_sigma, n_ok, worst_lm, warnings}
+Camera-level parameter (tracker: section): view ('ventral'|'frontal').
 Per-part parameters (tracker: section): template_px, search_px, min_score,
 fit ('rigid'|'similarity'), rotate_templates, smooth, nonrigid_px (residual
 above which the overlay warns that the landmarks do not move as one body:
 landmarks on specular highlights, legs, or the proboscis, or a mismatch),
 lever_px (optional; see above).
-Geometry (gui.<part>): hinge (neck pivot), landmarks: [{x, y}, ...].
+Geometry (gui.<part>): hinge (the joint), axis_deg (long axis, draggable
+in the GUI), landmarks: [{x, y}, ...].
 """
 import os
 
@@ -116,6 +135,25 @@ def safe_search_px(min_dist, template_px):
     if not np.isfinite(min_dist):
         return None
     return max(2, int(0.9 * min_dist) - template_px // 2)
+
+
+# Which rotation each of the three channels carries, per camera view.
+# 'inplane' is the exact one; 'axial' and 'lateral' need the lever arm.
+VIEW_CHANNELS = {
+    'ventral': {'inplane': 'yaw',  'axial': 'pitch', 'lateral': 'roll'},
+    'frontal': {'inplane': 'roll', 'axial': 'pitch', 'lateral': 'yaw'},
+}
+MIN_AXIS_PX = 8.0      # hinge->centroid shorter than this cannot define an axis
+
+
+def axis_vectors(axis_deg):
+    """Unit vector along the part's long axis and its perpendicular.
+
+    The perpendicular is the axis rotated +90 deg, which in image coordinates
+    (y down) is clockwise on screen. Returns (axial, lateral)."""
+    a = np.radians(float(axis_deg))
+    ax = np.array([np.cos(a), np.sin(a)])
+    return ax, np.array([-ax[1], ax[0]])
 
 
 def match_landmarks(image, templates, predicted, search_px, margin):
@@ -214,6 +252,11 @@ class LandmarkTracker(object):
         self.nonrigid_px = float(t.get('nonrigid_px', 2.0))   # residual above this = warn
         lever = t.get('lever_px', None)                        # None until calibrated
         self.lever_px = float(lever) if lever else None
+        self.view = str(params.get('view', 'frontal')).lower()
+        if self.view not in VIEW_CHANNELS:
+            self.view = 'frontal'
+        self.channels = VIEW_CHANNELS[self.view]
+        self.axis_deg = g.get('axis_deg', None)   # geometry: lives under gui.<part>
         self.ptHinge_i = np.array([g['hinge']['x'], g['hinge']['y']], dtype=float)
         pts = np.array(self.landmarks(), dtype=float).reshape(-1, 2)
         # Check the layout before trusting it, and never let the matcher search
@@ -228,6 +271,18 @@ class LandmarkTracker(object):
             self.warnings.append('AMBIGUOUS LAYOUT')
         if 0 < len(pts) < 4:
             self.warnings.append('only %d landmarks' % len(pts))
+        # The part's long axis splits the displacement into pitch (along it)
+        # and roll/yaw (across it). Prefer the explicit angle; fall back to
+        # hinge->centroid, which is only meaningful with the hinge on the joint.
+        self.axis, self.lateral = None, None
+        if self.axis_deg is not None:
+            self.axis, self.lateral = axis_vectors(self.axis_deg)
+        elif len(pts):
+            v = pts.mean(0) - self.ptHinge_i
+            if np.linalg.norm(v) >= MIN_AXIS_PX:
+                self.axis, self.lateral = axis_vectors(np.degrees(np.arctan2(v[1], v[0])))
+            else:
+                self.warnings.append('SET AXIS')
         # Keep templates only if the landmarks did not move.
         if self.template_pts is None or len(self.template_pts) != len(pts) or \
                 (len(pts) and np.abs(self.template_pts - pts).max() > 0.5):
@@ -239,8 +294,14 @@ class LandmarkTracker(object):
         self.roll_s = None
         self.update_handle_points()
 
+    def axis_handle_len(self):
+        return max(24.0, 1.4 * self.layout['rms_radius'])
+
     def update_handle_points(self):
         self.handles = {'hinge': ui.Handle(self.ptHinge_i.copy(), self.bgra, name='hinge')}
+        if self.axis is not None:
+            self.handles['axis'] = ui.Handle(
+                self.ptHinge_i + self.axis * self.axis_handle_len(), self.bgra, name='axis')
         for k, (x, y) in enumerate(self.landmarks()):
             self.handles['lm%d' % k] = ui.Handle(np.array([x, y]), self.bgra, name='lm%d' % k)
 
@@ -405,7 +466,7 @@ class LandmarkTracker(object):
             self.state.radii = [np.nan, np.nan]
             self.state.gradients = [np.nan, np.nan, np.nan]
             self.state.kind = 'landmarks'
-            self.state.extra = self._extra(np.nan, 0, np.nan, np.nan)
+            self.state.extra = self._extra(np.nan, 0, None, np.nan)
             self.state.intensity = float(scores[np.isfinite(scores)].mean()) if np.isfinite(scores).any() else 0.0
             return
         theta, scale, dc, resid, resid_full = fit
@@ -435,7 +496,7 @@ class LandmarkTracker(object):
         n_ok = int(ok.sum())
         sigma = resid / (rms * np.sqrt(n_ok)) if rms > 0 and n_ok else np.nan
         self._track_worst(resid_full)
-        self.state.extra = self._extra(sigma, n_ok, dc_corr[0], dc_corr[1])
+        self.state.extra = self._extra(sigma, n_ok, dc_corr, roll)
 
     def _track_worst(self, resid_full):
         """Running per-landmark residual, so a single point that is quietly
@@ -462,38 +523,60 @@ class LandmarkTracker(object):
             return None
         return k
 
-    def _extra(self, roll_sigma, n_ok, dx_corr, dy_corr):
-        """Auxiliary channels: precision, layout health, and — only once
-        `lever_px` has been calibrated — yaw and pitch as real angles."""
-        yaw = pitch = np.nan
+    def _extra(self, roll_sigma, n_ok, dc_corr, inplane):
+        """The three rotations under fixed anatomical names, so downstream code
+        never has to know the view.
+
+        The in-plane one is always finite -- it is the fit's own rotation.
+        The other two are the displacement resolved along the part's axis
+        (pitch) and across it (roll or yaw), and stay NaN until `lever_px`
+        turns pixels into an angle."""
+        out = {'roll': np.nan, 'pitch': np.nan, 'yaw': np.nan,
+               'd_axial': np.nan, 'd_lateral': np.nan,
+               'roll_sigma': float(roll_sigma), 'n_ok': int(n_ok),
+               'worst_lm': self.worst_landmark(), 'warnings': list(self.warnings),
+               'view': self.view, 'channels': dict(self.channels)}
+        out[self.channels['inplane']] = float(inplane)
+        if dc_corr is None or self.axis is None:
+            return out
+        d_ax = float(np.dot(dc_corr, self.axis))
+        d_lat = float(np.dot(dc_corr, self.lateral))
+        out['d_axial'], out['d_lateral'] = d_ax, d_lat
         if self.lever_px:
-            yaw = float(np.arcsin(np.clip(dx_corr / self.lever_px, -1.0, 1.0)))
-            pitch = float(np.arcsin(np.clip(dy_corr / self.lever_px, -1.0, 1.0)))
-        return {'roll_sigma': float(roll_sigma), 'n_ok': int(n_ok),
-                'worst_lm': self.worst_landmark(), 'warnings': list(self.warnings),
-                'yaw': yaw, 'pitch': pitch}
+            out[self.channels['axial']] = float(
+                np.arcsin(np.clip(d_ax / self.lever_px, -1.0, 1.0)))
+            out[self.channels['lateral']] = float(
+                np.arcsin(np.clip(d_lat / self.lever_px, -1.0, 1.0)))
+        return out
 
     # ------------------------------------------------------------- drawing
 
     def status_text(self):
-        """Short quality summary for the GUI status stack: how many landmarks
-        matched this frame, the mean match score, and a warning when they stop
-        moving as one rigid body."""
+        """The whole readout for this part, named for the camera view: the
+        exact in-plane angle in degrees with its precision, then the two
+        lever-arm channels (px, or degrees once calibrated), then match
+        quality and any warnings. gui/app.py prefixes only the part label."""
         if not len(self.ok):
             return ''
-        g = self.state.gradients
         x = getattr(self.state, 'extra', None) or {}
-        s = ''
+        ch = self.channels
+        inplane = x.get(ch['inplane'], np.nan)
+        s = ' %-5s%+6.1f deg' % (ch['inplane'], np.degrees(inplane)) \
+            if np.isfinite(inplane) else ' %-5s   -- ' % ch['inplane']
         sigma = x.get('roll_sigma', np.nan)
         if np.isfinite(sigma):
             s += ' +-%.1f' % np.degrees(sigma)
-        if len(g) > 2 and np.isfinite(g[0]):
+        d_ax, d_lat = x.get('d_axial', np.nan), x.get('d_lateral', np.nan)
+        if np.isfinite(d_ax):
             if self.lever_px:
-                s += '  yaw% 5.1f pitch% 5.1f deg' % (np.degrees(x.get('yaw', np.nan)),
-                                                      np.degrees(x.get('pitch', np.nan)))
+                s += '  %s%+5.1f %s%+5.1f deg' % (
+                    ch['axial'], np.degrees(x.get(ch['axial'], np.nan)),
+                    ch['lateral'], np.degrees(x.get(ch['lateral'], np.nan)))
             else:
-                s += '  yaw%+5.1f pitch%+5.1f px' % (g[0], g[1])
+                s += '  %s%+5.1f %s%+5.1f px' % (ch['axial'], d_ax,
+                                                 ch['lateral'], d_lat)
         s += '  %d/%d  q%.2f' % (int(self.ok.sum()), len(self.ok), self.state.intensity)
+        g = self.state.gradients
         if len(g) > 2 and np.isfinite(g[2]) and g[2] > self.nonrigid_px:
             s += '  NON-RIGID %.1fpx' % g[2]
         k = x.get('worst_lm')
@@ -508,6 +591,14 @@ class LandmarkTracker(object):
         self.handles['hinge'].draw(image)
         if not g['track']:
             return
+        if self.axis is not None:
+            # The long axis: displacement along it is pitch, across it is the
+            # view's third rotation. Drawn so the convention is visible.
+            tip = self.ptHinge_i + self.axis * self.axis_handle_len()
+            cv2.arrowedLine(image, (int(self.ptHinge_i[0]), int(self.ptHinge_i[1])),
+                            (int(tip[0]), int(tip[1])), (200, 200, 60), 1, tipLength=0.25)
+            cv2.putText(image, '+' + self.channels['axial'], (int(tip[0]) + 3, int(tip[1]) - 3),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.32, (200, 200, 60))
         worst = (getattr(self.state, 'extra', None) or {}).get('worst_lm')
         for k, (x, y) in enumerate(self.ref_pts):
             if k in self.weak:

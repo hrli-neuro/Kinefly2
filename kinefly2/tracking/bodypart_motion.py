@@ -162,6 +162,10 @@ class MotionTrackedBodypart(object):
          
 
     def get_bodyangle_i(self):
+        # Frozen in the config so a hinge move cannot shift the wing angles.
+        frozen = self.params.get('body_axis_deg')
+        if frozen is not None:
+            return float(np.radians(frozen))
         angle_i = imageprocessing.get_angle_from_points_i(np.array([self.params['gui']['abdomen']['hinge']['x'], self.params['gui']['abdomen']['hinge']['y']]), 
                                           np.array([self.params['gui']['head']['hinge']['x'], self.params['gui']['head']['hinge']['y']]))
         #angleBody_i  = (angle_i + np.pi) % (2.0*np.pi) - np.pi

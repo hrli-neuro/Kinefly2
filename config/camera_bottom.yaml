@@ -6,13 +6,21 @@ camera:
   loop: false
 tracker:
   invertcolor: true
+  view: ventral
   scale_image: 1.0
   n_edges_max: 1
   rc_background: 1000.0
   wingbeat_min: 180
   wingbeat_max: 220
   head:
-    tracker: area
+    tracker: landmarks
+    template_px: 13
+    search_px: 10
+    min_score: 0.4
+    fit: rigid
+    rotate_templates: true
+    smooth: 0.0
+    nonrigid_px: 2.0
     autozero: true
     threshold: 0.0
     feathering: 0.25
@@ -54,12 +62,22 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 278.12556143826805
-        y: 163.80000358668622
-      radius_outer: 29.546573405388315
-      radius_inner: 11.40175425099138
-      angle_hi: 1.0868771956632024
-      angle_lo: -1.0868771956632024
+        x: 280.0
+        y: 164.0
+      radius_outer: 32.770241272597865
+      radius_inner: 14.87578304130834
+      angle_hi: 1.0330055122315223
+      angle_lo: -1.3670431226188864
+      axis_deg: 3.873756591863876
+      landmarks:
+      - x: 302.0
+        y: 162.0
+      - x: 290.0
+        y: 145.0
+      - x: 295.0
+        y: 181.0
+      - x: 311.0
+        y: 142.0
     abdomen:
       track: false
       subtract_bg: false
@@ -76,23 +94,23 @@ tracker:
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 237.14952574745985
-        y: 138.76074610307114
-      radius_outer: 100.16985574512923
+        x: 242.0
+        y: 136.0
+      radius_outer: 107.07940978544848
       radius_inner: 72.55714687158297
-      angle_hi: -0.14032230725997774
-      angle_lo: -1.384248670457543
+      angle_hi: -0.2640481519209077
+      angle_lo: -1.1332829573867702
     right:
       track: true
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 235.10546834481647
-        y: 184.7588085878524
-      radius_outer: 120.56948204251356
+        x: 240.0
+        y: 191.0
+      radius_outer: 101.86756107809786
       radius_inner: 72.55714687158297
-      angle_hi: 0.9746390216541299
-      angle_lo: 0.04496241962143088
+      angle_hi: 1.2663078072664193
+      angle_lo: 0.2080413133300829
     aux:
       track: false
       subtract_bg: false
@@ -102,3 +120,4 @@ tracker:
       radius1: 30.0
       radius2: 20.0
       angle: 0.0009577905185621404
+  body_axis_deg: 3.873756591863876

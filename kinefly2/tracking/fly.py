@@ -116,6 +116,18 @@ class Fly(object):
         self.stamp = 0
 
     def set_params(self, params):
+        # The body frame the wing angles are reported in. Deriving it from the
+        # head/abdomen hinges on every call couples those parts to the wings:
+        # move either hinge and every wing angle shifts. Freeze it in the
+        # config instead, seeded once from the hinges so existing recordings
+        # stay comparable. Must happen before the parts read it.
+        if params.get('body_axis_deg') is None:
+            params['body_axis_deg'] = float(np.degrees(
+                imageprocessing.get_angle_from_points_i(
+                    np.array([params['gui']['abdomen']['hinge']['x'],
+                              params['gui']['abdomen']['hinge']['y']]),
+                    np.array([params['gui']['head']['hinge']['x'],
+                              params['gui']['head']['hinge']['y']]))))
         self.params = params
         
         self.axis.set_params(params)
@@ -132,7 +144,7 @@ class Fly(object):
         self.ptBodyCenter_i = imageprocessing.get_intersection(pt1,pt2,pt3,pt4)
 
         r = max(params['gui']['left']['radius_outer'], params['gui']['right']['radius_outer'])
-        self.angleBody_i = self.get_bodyangle_i()
+        self.angleBody_i = float(np.radians(params['body_axis_deg']))
         self.ptBodyIndicator1 = tuple((self.ptBodyCenter_i + r * np.array([np.cos(self.angleBody_i), np.sin(self.angleBody_i)])).astype(int))
         self.ptBodyIndicator2 = tuple((self.ptBodyCenter_i - r * np.array([np.cos(self.angleBody_i), np.sin(self.angleBody_i)])).astype(int))
         

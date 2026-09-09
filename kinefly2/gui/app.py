@@ -34,6 +34,11 @@ def tracker_defaults():
             'rc_background': 1000.0, # Time constant (s) of the moving average background.
             'wingbeat_min': 180,     # Bounds for wingbeat frequency measurement.
             'wingbeat_max': 220,
+            'view': 'frontal',       # 'ventral' (camera below) or 'frontal' (in front):
+                                     # decides which rotation each landmark channel is.
+            'body_axis_deg': None,   # Body frame for the wing angles. Seeded from the
+                                     # head/abdomen hinges on first run, then frozen so
+                                     # moving a hinge cannot shift the wing angles.
             'head': {'tracker': 'area',
                      'autozero': True,
                      'threshold': 0.0,
@@ -118,6 +123,15 @@ class TrackerView:
         self.params = self.config.get('tracker') or {}
         SetDict().set_dict_with_preserve(self.params, tracker_defaults())
         self.params = self.legalize_params(self.params)
+        # Freeze the body frame the wing angles are reported in. Seeded from the
+        # head/abdomen hinges so existing recordings stay comparable, then held
+        # fixed: without this, re-placing either hinge (which landmark tracking
+        # invites) silently shifts every wing angle.
+        if self.params.get('body_axis_deg') is None:
+            h = self.params['gui']['head']['hinge']
+            a = self.params['gui']['abdomen']['hinge']
+            self.params['body_axis_deg'] = float(np.degrees(
+                imageprocessing.get_angle_from_points_i((a['x'], a['y']), (h['x'], h['y']))))
         self.scale = self.params['scale_image']
         self.paramsStartup = copy.deepcopy(self.params)   # 'reset' target
         self.paramsUndo = None                             # params before the last autoplace
@@ -313,7 +327,7 @@ class TrackerView:
                 paramsScaled['gui'][partname][tag]['y'] = paramsIn['gui'][partname][tag]['y'] * scale
         return paramsScaled
 
-    GUI_OWNED = ('gui', 'invertcolor')   # the only tracker keys the GUI writes back
+    GUI_OWNED = ('gui', 'invertcolor', 'body_axis_deg')   # the only tracker keys the GUI writes back
 
     def save_params(self, save_reference=True):
         """Write the GUI-owned parameters back into the camera YAML, merging
@@ -458,10 +472,13 @@ class TrackerView:
                     if self.params['gui'][partname]['track']:
                         part = getattr(self.fly, partname)
                         s = label + ':'
-                        if len(part.state.angles) > 0:
-                            s += '% 6.1f deg' % np.degrees(part.state.angles[0])
                         if hasattr(part, 'status_text'):
-                            s += part.status_text()   # landmarks: quality + warnings
+                            # The landmark tracker names its own channels (they
+                            # differ between the ventral and frontal views) and
+                            # renders the whole readout itself.
+                            s += part.status_text()
+                        elif len(part.state.angles) > 0:
+                            s += '% 6.1f deg' % np.degrees(part.state.angles[0])
                         # The landmark readout carries warnings worth reading, so
                         # wrap it onto extra lines rather than let it run off the
                         # right edge of the frame.
@@ -518,9 +535,12 @@ class TrackerView:
         add(type='pushbutton', name='reset', text='reset')
         add(type='pushbutton', name='zero', text='zero')
         add(type='pushbutton', name='record', text='record')
-        if self.landmark_parts():
-            add(type='pushbutton', name='addlm', text='+lm')
-            add(type='pushbutton', name='dellm', text='-lm')
+        # One pair of buttons per landmark part, so every part is reachable
+        # (a single pair could only ever address the first one).
+        for partname in self.landmark_parts():
+            initial = partname[0].upper()
+            add(type='pushbutton', name='addlm_' + partname, text='+' + initial)
+            add(type='pushbutton', name='dellm_' + partname, text='-' + initial)
         add(type='static', name='track', text='track:',
             sides=ui.SIDE_LEFT | ui.SIDE_TOP | ui.SIDE_BOTTOM)
         for partname, label in (('head', 'H'), ('abdomen', 'A'), ('left', 'L'),
@@ -685,6 +705,17 @@ class TrackerView:
             lms = paramsScaled['gui'][partnameSelected].get('landmarks') or []
             if k < len(lms):
                 lms[k] = {'x': float(ptMouse[0]), 'y': float(ptMouse[1])}
+            self.params = self.scale_params(paramsScaled, 1 / self.scale)
+            return
+
+        if tagSelected == 'axis':
+            # Drag the arrow to set the part's anatomical long axis. Only the
+            # direction matters; the handle's distance is cosmetic.
+            hinge = paramsScaled['gui'][partnameSelected]['hinge']
+            v = np.array(ptMouse, dtype=float) - np.array([hinge['x'], hinge['y']])
+            if np.linalg.norm(v) > 2.0:
+                paramsScaled['gui'][partnameSelected]['axis_deg'] = float(
+                    np.degrees(np.arctan2(v[1], v[0])))
             self.params = self.scale_params(paramsScaled, 1 / self.scale)
             return
 
@@ -896,16 +927,15 @@ class TrackerView:
                 elif self.nameSelected == self.nameSelectedNow == 'record':
                     if self.on_record is not None:
                         self.on_record()
-                elif self.nameSelected == self.nameSelectedNow == 'addlm':
-                    parts = self.landmark_parts()
-                    if parts:
-                        self.placingLandmark = parts[0]
-                        self.statusText = 'click on the %s to add landmark %d' % (
-                            parts[0], len(self.params['gui'][parts[0]].get('landmarks') or []))
-                elif self.nameSelected == self.nameSelectedNow == 'dellm':
-                    parts = self.landmark_parts()
-                    if parts:
-                        self.remove_landmark(parts[0])
+                elif (self.nameSelected == self.nameSelectedNow
+                      and str(self.nameSelected).startswith('addlm_')):
+                    part = self.nameSelected[len('addlm_'):]
+                    self.placingLandmark = part
+                    self.statusText = 'click on the %s to add landmark %d' % (
+                        part, len(self.params['gui'][part].get('landmarks') or []))
+                elif (self.nameSelected == self.nameSelectedNow
+                      and str(self.nameSelected).startswith('dellm_')):
+                    self.remove_landmark(self.nameSelected[len('dellm_'):])
 
             elif self.uiSelected == 'checkbox':
                 if self.nameSelected == self.nameSelectedNow:

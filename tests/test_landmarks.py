@@ -55,7 +55,8 @@ def run(tracker, roll_amp, yaw_amp, n=360, pitch_amp=0.0, landmarks=None):
     pts = landmarks or [lm0[k] for k in ('eye_l', 'eye_r', 'patch', 'ant_l', 'ant_r')]
     make_config(cfg, pts, tracker)
     view = TrackerView('front', cfg, use_gui=False)
-    out = {k: [] for k in ('roll', 'yaw', 'pitch', 'est_roll', 'est_dx', 'est_dy', 'sigma')}
+    out = {k: [] for k in ('roll', 'yaw', 'pitch', 'est_roll', 'est_dx', 'est_dy',
+                           'est_axial', 'est_lateral', 'sigma')}
     dts = []
     # Drive the three rotations at harmonics of the run length, so the truth
     # signals are exactly orthogonal over the window and any correlation left
@@ -75,7 +76,10 @@ def run(tracker, roll_amp, yaw_amp, n=360, pitch_amp=0.0, landmarks=None):
         out['est_roll'].append(part.angles[0] if len(part.angles) > 0 else np.nan)
         out['est_dx'].append(g[0] if len(g) >= 3 else np.nan)
         out['est_dy'].append(g[1] if len(g) >= 3 else np.nan)
-        out['sigma'].append((part.extra or {}).get('roll_sigma', np.nan))
+        ex = part.extra or {}
+        out['est_axial'].append(ex.get('d_axial', np.nan))
+        out['est_lateral'].append(ex.get('d_lateral', np.nan))
+        out['sigma'].append(ex.get('roll_sigma', np.nan))
         out['roll'].append(math.radians(roll))
         out['yaw'].append(math.radians(yaw))
         out['pitch'].append(math.radians(pitch))
@@ -127,9 +131,9 @@ def test_pitch_is_the_vertical_channel():
     scaled by the same lever arm as yaw. Roll, yaw and pitch must come out on
     three separate channels without leaking into each other."""
     r, dt = run('landmarks', 8.0, 12.0, pitch_amp=10.0)
-    c_pitch = corr(r['est_dy'], r['pitch'])
-    c_yaw = corr(r['est_dx'], r['yaw'])
-    cross = (corr(r['est_dy'], r['yaw']), corr(r['est_dx'], r['pitch']),
+    c_pitch = corr(r['est_axial'], r['pitch'])
+    c_yaw = corr(r['est_lateral'], r['yaw'])
+    cross = (corr(r['est_axial'], r['yaw']), corr(r['est_lateral'], r['pitch']),
              corr(r['est_roll'], r['pitch']))
     print('roll 8 + yaw 12 + pitch 10 deg: dy~pitch r=%+.3f | dx~yaw r=%+.3f | '
           'roll r=%+.3f | cross-talk dy~yaw %+.3f dx~pitch %+.3f roll~pitch %+.3f | %.2f ms'
@@ -142,8 +146,8 @@ def test_pitch_is_the_vertical_channel():
 
     # Yaw and pitch share one lever arm: the px-per-radian slope must match.
     from tests.make_synthetic_video import FRONT_DEPTH
-    ky = np.polyfit(np.sin(r['yaw'][5:]), r['est_dx'][5:], 1)[0]
-    kp = np.polyfit(np.sin(r['pitch'][5:]), r['est_dy'][5:], 1)[0]
+    ky = np.polyfit(np.sin(r['yaw'][5:]), r['est_lateral'][5:], 1)[0]
+    kp = np.polyfit(np.sin(r['pitch'][5:]), r['est_axial'][5:], 1)[0]
     print('lever arm: from yaw %.1f px/rad, from pitch %.1f px/rad, true %.1f'
           % (abs(ky), abs(kp), FRONT_DEPTH))
     assert abs(abs(ky) - abs(kp)) / abs(ky) < 0.25, (ky, kp)
@@ -233,7 +237,133 @@ def test_lever_px_produces_angles():
     print('lever_px %.1f: true yaw 10.0 pitch 6.0 -> measured yaw %.1f pitch %.1f deg'
           % (FRONT_DEPTH, yaw_deg, pitch_deg))
     assert abs(abs(yaw_deg) - 10.0) < 3.0, yaw_deg
-    assert abs(abs(pitch_deg) - 6.0) < 3.0, pitch_deg
+    # Positive pitch carries the head dorsally, which is +axis, so the sign
+    # must come out positive rather than merely the right magnitude.
+    assert abs(pitch_deg - 6.0) < 3.0, pitch_deg
+
+
+def _lm_tracker(view, axis_deg, pts, lever=None, hinge=(176.0, 230.0)):
+    from kinefly2.tracking.tracker_landmarks import LandmarkTracker
+    p = {'view': view,
+         'gui': {'head': {'track': True,
+                          'hinge': {'x': hinge[0], 'y': hinge[1]},
+                          'axis_deg': axis_deg,
+                          'landmarks': [{'x': float(x), 'y': float(y)} for x, y in pts]}},
+         'head': {'template_px': 17, 'search_px': 12, 'min_score': 0.4}}
+    if lever:
+        p['head']['lever_px'] = lever
+    return LandmarkTracker(name='head', params=p)
+
+
+def test_view_decides_which_rotation_is_exact():
+    """The same tracker means different anatomy in each view: a ventral camera
+    measures yaw exactly, a frontal one roll. The other two channels come from
+    the displacement and stay NaN until lever_px is calibrated."""
+    from tests.make_synthetic_video import draw_front_frame
+
+    img0, lm0 = draw_front_frame(0.0, 0.0)
+    pts = [lm0[k] for k in ('eye_l', 'eye_r', 'patch', 'ant_l', 'ant_r')]
+    img, _ = draw_front_frame(6.0, 10.0, 4.0)
+    for view, exact, others in (('ventral', 'yaw', ('roll', 'pitch')),
+                                ('frontal', 'roll', ('yaw', 'pitch'))):
+        tr = _lm_tracker(view, -90.0, pts)
+        tr.update(1 / 90., img0, False)
+        tr.update(1 / 90., img, False)
+        e = tr.state.extra
+        assert e['channels']['inplane'] == exact, e['channels']
+        assert np.isfinite(e[exact]), (view, e)
+        assert np.isclose(e[exact], tr.state.angles[0]), (view, e[exact], tr.state.angles[0])
+        for name in others:
+            assert not np.isfinite(e[name]), (view, name, e[name])
+        assert np.isfinite(e['d_axial']) and np.isfinite(e['d_lateral'])
+        print('view=%-8s exact channel = %-5s (= the in-plane angle, %+.2f deg); '
+              '%s NaN until lever_px' % (view, exact, np.degrees(e[exact]), '/'.join(others)))
+
+
+def test_axis_rotates_the_decomposition():
+    """axis_deg is what makes the split anatomical rather than image-aligned:
+    rotating it by 90 deg must swap the axial and lateral channels, and by
+    180 deg must flip their signs."""
+    from tests.make_synthetic_video import draw_front_frame
+
+    img0, lm0 = draw_front_frame(0.0, 0.0)
+    pts = [lm0[k] for k in ('eye_l', 'eye_r', 'patch', 'ant_l', 'ant_r')]
+    img, _ = draw_front_frame(0.0, 12.0, 8.0)
+
+    def channels(axis_deg):
+        tr = _lm_tracker('frontal', axis_deg, pts)
+        tr.update(1 / 90., img0, False)
+        tr.update(1 / 90., img, False)
+        return tr.state.extra['d_axial'], tr.state.extra['d_lateral']
+
+    a0, l0 = channels(-90.0)
+    a90, l90 = channels(0.0)          # axis rotated by +90 deg
+    a180, l180 = channels(90.0)       # axis rotated by 180 deg
+    print('axis -90: axial %+6.2f lateral %+6.2f | axis 0: %+6.2f %+6.2f | axis +90: %+6.2f %+6.2f'
+          % (a0, l0, a90, l90, a180, l180))
+    # Rotating the axis by +90 deg carries the old lateral onto the new axial,
+    # and the old axial onto the negated new lateral.
+    assert np.isclose(a90, l0, atol=0.05) and np.isclose(l90, -a0, atol=0.05)
+    assert np.isclose(a180, -a0, atol=0.05) and np.isclose(l180, -l0, atol=0.05)
+
+
+def test_pitch_is_axial_in_both_views():
+    """Pitch is the axial channel whichever way the camera looks, and the two
+    displacement channels share one lever arm."""
+    r, _ = run('landmarks', 4.0, 12.0, pitch_amp=10.0)
+    # run() drives the synthetic head with the front generator; the axis points
+    # dorsally (-90 deg), so the axial channel is -dy in image terms.
+    c_axial = corr(r['est_axial'], r['pitch'])
+    c_lat = corr(r['est_lateral'], r['yaw'])
+    print('axial~pitch r=%+.3f | lateral~yaw r=%+.3f' % (c_axial, c_lat))
+    assert abs(c_axial) > 0.95 and abs(c_lat) > 0.95
+
+
+def test_parts_and_wings_are_independent():
+    """The separation the rig depends on: each landmark part fits its own
+    points with its own templates, and the wing angles no longer move when a
+    head or abdomen hinge does."""
+    from kinefly2.tracking.tracker_landmarks import LandmarkTracker
+    from tests.make_synthetic_video import draw_front_frame
+
+    # Two landmark parts on the same image, far apart. Moving one part's
+    # landmarks/hinge must not change the other's output at all.
+    img0, lm0 = draw_front_frame(0.0, 0.0)
+    img, _ = draw_front_frame(5.0, 8.0, 4.0)
+    head_pts = [lm0[k] for k in ('eye_l', 'eye_r', 'patch', 'ant_l', 'ant_r')]
+
+    def head_out(hinge, axis):
+        tr = _lm_tracker('frontal', axis, head_pts, hinge=hinge)
+        tr.update(1 / 90., img0, False)
+        tr.update(1 / 90., img, False)
+        return tr.state.angles[0], tr.state.extra['d_axial'], tr.state.extra['d_lateral']
+
+    a1 = head_out((176.0, 230.0), -90.0)
+    a2 = head_out((176.0, 230.0), -90.0)
+    assert np.isfinite(a1[0]), 'the fit failed; the test set is bad, not the tracker'
+    assert a1 == a2, 'not deterministic'
+    # The in-plane angle needs no rotation centre, so moving the hinge far away
+    # must leave it bit-identical.
+    a3 = head_out((40.0, 40.0), -90.0)
+    assert a3[0] == a1[0], (a1[0], a3[0])
+    print('in-plane angle is hinge-independent: %+.6f rad either way' % a1[0])
+
+    # Wing angles must not depend on the head/abdomen hinges once the body
+    # axis is frozen in the config.
+    from kinefly2.tracking.fly import Fly
+    from kinefly2.gui.app import tracker_defaults
+    import copy as _copy
+    base = tracker_defaults()
+    base['body_axis_deg'] = 90.0
+    f1 = Fly(_copy.deepcopy(base))
+    moved = _copy.deepcopy(base)
+    moved['gui']['abdomen']['hinge'] = {'x': 60, 'y': 300}
+    moved['gui']['head']['hinge'] = {'x': 300, 'y': 20}
+    f2 = Fly(moved)
+    f1.set_params(_copy.deepcopy(base)); f2.set_params(moved)
+    assert f1.left.angleBody_i == f2.left.angleBody_i, (f1.left.angleBody_i, f2.left.angleBody_i)
+    assert f1.right.angleBody_i == f2.right.angleBody_i
+    print('wing body frame unchanged by hinge moves: %.6f rad both' % f1.left.angleBody_i)
 
 
 def test_rigid_fit_and_matching():
@@ -280,5 +410,9 @@ if __name__ == '__main__':
     test_roll_sigma_reports_precision()
     test_ambiguous_layout_is_caught_and_contained()
     test_lever_px_produces_angles()
+    test_view_decides_which_rotation_is_exact()
+    test_axis_rotates_the_decomposition()
+    test_pitch_is_axial_in_both_views()
+    test_parts_and_wings_are_independent()
     test_zero_recaptures_templates()
     print('OK')

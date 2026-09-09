@@ -175,7 +175,8 @@ def draw_front_frame(roll_deg, yaw_deg, pitch_deg=0.0, blur_sigma=0.0):
     Roll is an in-plane rotation. Yaw and pitch are seen end-on from the front
     and appear only as a shift of the head, both scaled by the same lever arm
     (FRONT_DEPTH, standing in for the head's anterior-posterior depth from the
-    neck): yaw moves it sideways, pitch moves it vertically.
+    neck): yaw moves it sideways, pitch moves it vertically. Positive pitch
+    carries the anterior of the head dorsally, so the landmarks move UP.
     """
     img = np.zeros((H, W), dtype=np.uint8)
     nx, ny = FRONT_NECK
@@ -183,7 +184,7 @@ def draw_front_frame(roll_deg, yaw_deg, pitch_deg=0.0, blur_sigma=0.0):
     yaw_shift = FRONT_DEPTH * math.sin(math.radians(yaw_deg))
     pitch_shift = FRONT_DEPTH * math.sin(math.radians(pitch_deg))
     cx = nx + yaw_shift + FRONT_HEAD_R * math.sin(roll)
-    cy = ny + pitch_shift - FRONT_HEAD_R * math.cos(roll)
+    cy = ny - pitch_shift - FRONT_HEAD_R * math.cos(roll)
 
     def place(dx, dy):
         # (dx, dy) in the head frame (x right, y up), rotated by roll.

@@ -1,43 +1,50 @@
-"""Post-hoc calibration of the front camera's yaw/pitch lever arm.
+"""Post-hoc calibration of a camera's lever arm, turning its two displacement
+channels into angles.
 
 Why this exists
 ---------------
-Seen from the front, the head's roll is an in-plane rotation and is measured
-exactly -- it needs no rotation centre and no scale. The other two rotations are
-seen end-on and appear only as a shift of the head:
+Each camera view measures ONE head rotation exactly -- the in-plane one, which
+needs no rotation centre and no scale -- and sees the other two only end-on, as
+a shift of the head:
 
-    head_dx_corr  <- YAW    (rotation about the dorsoventral axis)
-    head_dy_corr  <- PITCH  (rotation about the lateral axis)
+    ventral camera (below):  yaw exact;  pitch = axial shift, roll = lateral
+    frontal camera (front):  roll exact; pitch = axial shift, yaw  = lateral
 
-Both scale by the SAME constant: the head's anterior-posterior depth from the
-neck joint, in pixels. Put the neck at the origin and the landmark centroid at
-(lateral, depth, height); a small yaw moves the centroid horizontally by
--yaw*depth and a small pitch moves it vertically by +pitch*depth. The lateral
-and height offsets do not enter either one. So one number converts both
-channels, and this module fits it.
+Both shifts scale by the SAME constant: the depth of the landmark centroid from
+the joint along that camera's optical axis, in pixels. Put the joint at the
+origin with the centroid at (lateral, depth, height); a small rotation about
+either in-image axis moves the centroid by (angle x depth), and the other two
+offsets cancel out. So one number converts both channels, and this module fits
+it -- once per camera.
 
-That depth points along the front camera's optical axis, so a frontal view
-cannot measure it. The reference has to come from outside:
+That depth points along the optical axis, so the view cannot measure it. The
+reference has to come from outside:
 
-  * the bottom camera's head angle -- yaw is an in-plane rotation there, so it
-    is already a true angle and needs no lever arm of its own;
+  * the OTHER camera, whose exact in-plane angle is precisely the rotation this
+    camera sees as its lateral channel (see lever_inputs);
   * an external ground truth (a rotation stage stepping through known angles),
-    which is the only source that also checks the bottom camera itself;
-  * spontaneous yaw pooled over many recordings, if it spans enough range.
+    which is the only source that also checks the cameras themselves;
+  * spontaneous movement pooled over many recordings, if it spans enough range.
 
 Nothing here runs in real time. The pixel channels are what get logged, so the
 constant stays revisable and can be re-applied to old recordings -- which is
-the reason not to bake it into the recording. Once it is known, putting
-`lever_px:` in the head's section of the camera YAML makes Kinefly2 log
-head_yaw / head_pitch and show degrees in the GUI.
+the reason not to bake it into the recording. Once known, putting `lever_px:`
+in the head's section of the camera YAML makes Kinefly2 log all three
+rotations as angles and show degrees in the GUI.
+
+Because each view measures a DIFFERENT rotation exactly, the two cameras
+calibrate each other: the front camera's lateral channel is yaw, which the
+bottom camera measures exactly, and the bottom camera's lateral channel is
+roll, which the front camera measures exactly. Pitch then falls out of both
+independently -- a genuine cross-check rather than an assumption.
 
 Typical use, from a notebook:
 
     from kinefly2.analysis import calibrate
     log = calibrate.load_log('.../260819_..._flystate.h5')
-    fit = calibrate.fit_lever(log['front/head_dx_corr'], log['bottom/head_angle'])
-    ok, why = calibrate.check_fit(fit)
-    print(calibrate.report(fit, ok, why))
+    shift, ref, name = calibrate.lever_inputs(log, 'front', reference='bottom')
+    fit = calibrate.fit_lever(shift, ref)
+    print(calibrate.report(fit))
 """
 import math
 
@@ -86,6 +93,42 @@ def epochs_from_events(log, substring, duration=None):
     return mask
 
 
+def exact_channel(log, camera):
+    """Which rotation this camera measures exactly, and its values (rad).
+
+    Each view measures one rotation as a true in-plane angle -- yaw for a
+    ventral camera, roll for a frontal one -- and that is the only anatomical
+    column that is finite before calibration."""
+    for name in ('roll', 'pitch', 'yaw'):
+        v = log.get('%s/head_%s' % (camera, name))
+        if v is not None and np.isfinite(np.asarray(v, dtype=float)).any():
+            return name, np.asarray(v, dtype=float)
+    return None, None
+
+
+def lever_inputs(log, camera, reference):
+    """Inputs for fitting `camera`'s lever arm: (shift_px, reference_rad, name).
+
+    The two cameras calibrate each other. A camera's LATERAL channel carries
+    exactly the rotation the other camera measures as its in-plane angle --
+    a frontal camera's lateral channel is yaw, which a ventral camera measures
+    exactly, and vice versa. So the pair matches up on its own, and this
+    refuses the combination where it does not (two cameras of the same view
+    cannot calibrate one another).
+    """
+    ref_name, ref = exact_channel(log, reference)
+    own_name, _ = exact_channel(log, camera)
+    if ref_name is None:
+        raise ValueError('%s has no exact angle: is it running a landmarks '
+                         'tracker with a view set?' % reference)
+    if ref_name == own_name:
+        raise ValueError('%s and %s measure the same rotation (%s) exactly, so '
+                         'neither can calibrate the other. Use cameras with '
+                         'different views.' % (camera, reference, ref_name))
+    shift = np.asarray(log['%s/head_d_lateral' % camera], dtype=float)
+    return shift, ref, ref_name
+
+
 def _huber_lstsq(X, y, delta=1.5, iters=25):
     """Huber-weighted least squares: outlying frames (a lost landmark, a leg
     across the head) get down-weighted instead of dragging the slope."""
@@ -102,12 +145,13 @@ def _huber_lstsq(X, y, delta=1.5, iters=25):
 
 
 def fit_lever(shift_px, yaw_rad, mask=None, n_boot=400, seed=0):
-    """Fit shift_px = lever_px * sin(yaw) + offset.
+    """Fit shift_px = lever_px * sin(reference) + offset.
 
-    `shift_px` is the front camera's head_dx_corr and `yaw_rad` the reference
-    yaw angle (radians), sampled on the same rows. sin() rather than the angle
-    itself because the projected shift of a point rotating about the neck is
-    what the camera sees; the two agree to 2% out to 20 degrees.
+    `shift_px` is the camera's lateral channel (head_d_lateral) and `yaw_rad`
+    the reference angle in radians, sampled on the same rows; use
+    lever_inputs() to pair them up. sin() rather than the angle itself because
+    the projected shift of a point rotating about the joint is what the camera
+    sees; the two agree to 2% out to 20 degrees.
 
     Returns a dict with lever_px, offset_px, r2, n, yaw_range_deg, and a 95%
     bootstrap CI on lever_px. Fitting is robust (Huber), so a few bad frames
