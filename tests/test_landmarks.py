@@ -243,6 +243,11 @@ def test_lever_px_produces_angles():
     assert abs(pitch_deg - 6.0) < 3.0, pitch_deg
 
 
+def ensure_synthetic():
+    """(Re)generate the synthetic fixtures; a GUI run can edit them in place."""
+    subprocess.check_call([sys.executable, os.path.join(HERE, 'make_synthetic_video.py')])
+
+
 def draw_front_frame_ref():
     from tests.make_synthetic_video import draw_front_frame
     return draw_front_frame(0.0, 0.0)
@@ -465,22 +470,77 @@ def test_parts_and_wings_are_independent():
     assert a3[0] == a1[0], (a1[0], a3[0])
     print('in-plane angle is hinge-independent: %+.6f rad either way' % a1[0])
 
-    # Wing angles must not depend on the head/abdomen hinges once the body
-    # axis is frozen in the config.
+    # Wing angles must not depend on the head/abdomen hinges at all.
+    #
+    # An earlier version of this test compared `angleBody_i` between two Fly
+    # objects and passed while the coupling was still there: freezing the body
+    # FRAME left each wing's own reference direction (angleBodypart_i) deriving
+    # from the head-abdomen hinge line, so moving a head hinge still shifted
+    # every wing angle by ~15 deg. Comparing the tracked ANGLES is what catches
+    # that, so this compares those.
+    import copy as _copy
+
+    import yaml as _yaml
+    from kinefly2.camera.base import make_source
+    from kinefly2.gui.app import TrackerView
+
+    ensure_synthetic()
+    cfg_src = os.path.join(HERE, 'videos', 'synthetic_bottom.yaml')
+    base_cfg = _yaml.safe_load(open(cfg_src))
+    # Freeze the body frame, as any config that has been opened once does:
+    # TrackerView seeds body_axis_deg from the hinges and persists it. Left
+    # unset it would be re-seeded from whatever the hinges are, which is the
+    # one remaining (and intended) way a hinge can still move the wing frame.
+    base_cfg['tracker']['body_axis_deg'] = 90.0
+
+    def wing_angles(mutate, n=120):
+        c = _copy.deepcopy(base_cfg)
+        mutate(c)
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, 'cam.yaml')
+        _yaml.safe_dump(c, open(p, 'w'), sort_keys=False)
+        view = TrackerView('wingtest', p, use_gui=False)
+        src = make_source(dict(c['camera'], pace=False, loop=False))
+        src.open()
+        out = []
+        for _ in range(n):
+            fr = src.read()
+            if fr is None:
+                break
+            st = view.process(fr)
+            out.append([st.parts['left'].angle, st.parts['right'].angle])
+        src.close()
+        return np.array(out)
+
+    ref = wing_angles(lambda c: None)
+    assert np.isfinite(ref).mean() > 0.9, 'fixture produced no wing angles'
+    for label, mv in (
+            ('head hinge', lambda c: c['tracker']['gui']['head']['hinge'].update(
+                {'y': c['tracker']['gui']['head']['hinge']['y'] + 20})),
+            ('abdomen hinge', lambda c: c['tracker']['gui']['abdomen']['hinge'].update(
+                {'y': c['tracker']['gui']['abdomen']['hinge']['y'] - 20})),
+            ('both', lambda c: (c['tracker']['gui']['head']['hinge'].update({'x': 300, 'y': 20}),
+                                c['tracker']['gui']['abdomen']['hinge'].update({'x': 60, 'y': 300})))):
+        got = wing_angles(mv)
+        diff = np.abs(np.nan_to_num(got) - np.nan_to_num(ref)).max()
+        assert diff == 0.0, 'moving the %s changed the wing angles by %.4f rad' % (label, diff)
+    print('wing angles bit-identical across head/abdomen hinge moves (3 cases)')
+
+    # And the reference really is the wing-base line: both wings measure from
+    # one shared line, so their zero directions are exactly opposite.
     from kinefly2.tracking.fly import Fly
     from kinefly2.gui.app import tracker_defaults
-    import copy as _copy
-    base = tracker_defaults()
-    base['body_axis_deg'] = 90.0
-    f1 = Fly(_copy.deepcopy(base))
-    moved = _copy.deepcopy(base)
-    moved['gui']['abdomen']['hinge'] = {'x': 60, 'y': 300}
-    moved['gui']['head']['hinge'] = {'x': 300, 'y': 20}
-    f2 = Fly(moved)
-    f1.set_params(_copy.deepcopy(base)); f2.set_params(moved)
-    assert f1.left.angleBody_i == f2.left.angleBody_i, (f1.left.angleBody_i, f2.left.angleBody_i)
-    assert f1.right.angleBody_i == f2.right.angleBody_i
-    print('wing body frame unchanged by hinge moves: %.6f rad both' % f1.left.angleBody_i)
+    d = tracker_defaults()
+    d['body_axis_deg'] = 90.0
+    fly = Fly(_copy.deepcopy(d))
+    fly.set_params(_copy.deepcopy(d))
+    opp = abs((fly.left.angleBodypart_i - fly.right.angleBodypart_i + np.pi) % (2 * np.pi) - np.pi)
+    assert abs(opp - np.pi) < 1e-9, ('wing zeros should be 180 deg apart', opp)
+    lo = np.array([d['gui']['left']['hinge']['x'], d['gui']['left']['hinge']['y']], float)
+    ro = np.array([d['gui']['right']['hinge']['x'], d['gui']['right']['hinge']['y']], float)
+    want = np.arctan2(lo[1] - ro[1], lo[0] - ro[0])
+    assert abs((fly.left.angleBodypart_i - want + np.pi) % (2 * np.pi) - np.pi) < 1e-9
+    print('wing zero is the wing-base line, the two exactly 180 deg apart')
 
 
 def test_rigid_fit_and_matching():

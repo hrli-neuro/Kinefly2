@@ -207,6 +207,18 @@ class TrackerView:
         print('%s: trackers  %s' % (name, '  '.join(
             '%s=%s' % (p, self.params[p]['tracker']) for p in ('head', 'abdomen', 'left', 'right')
             if self.params['gui'][p]['track'])))
+        # `autozero` is inherited from Kinefly but only the area and rotation
+        # trackers read it. Left in a config it reads as though the wings were
+        # being auto-zeroed, which they are not -- their zero is geometric
+        # (the line joining the wing hinges). Say so rather than editing the
+        # config, since the key goes live again if that part switches tracker.
+        inert = [p for p in ('head', 'abdomen', 'left', 'right')
+                 if self.params['gui'][p]['track']
+                 and self.params[p].get('autozero')
+                 and self.params[p]['tracker'] not in ('area', 'rotation')]
+        if inert:
+            print("%s: autozero is set on %s but only 'area' and 'rotation' use it; "
+                  "their zero is geometric (README 2.5.5)" % (name, ', '.join(inert)))
         if self.use_gui:
             cv2.namedWindow(self.window_name, 1)
             cv2.setMouseCallback(self.window_name, self.on_mouse, param=None)

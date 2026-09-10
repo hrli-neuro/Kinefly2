@@ -516,6 +516,49 @@ Parameters (`tracker: head:`): `template_px`, `search_px` (auto-clamped),
 `gui.head:` is `hinge`, `axis_deg` (frontal only), `landmarks`. Cost ≈
 0.3–0.6 ms.
 
+#### 2.5.5 What sets zero for each part
+
+Different parts get their zero in genuinely different ways, and it is worth
+knowing which is which before comparing numbers across flies.
+
+**Wings — geometric, no posture step.** 0° is the **line joining the two wing
+hinges**, shared by both wings, so a symmetric posture reads L = R and L−R ≈ 0.
+The only thing that sets it is where you put the two wing hinges; nothing else
+does, and in particular the head and abdomen hinges do not. Place the hinges
+accurately on the wing bases and the baseline follows.
+
+> **The convention changed on 2026-09-10.** A wing's zero used to be the
+> perpendicular from the head–abdomen hinge line, which had two costs measured
+> on a real recording: a resting fly read **L−R = −17.0°** of false asymmetry
+> (against **+1.4°** now), and moving the **head** hinge 20 px shifted each wing
+> by ~15° and L−R by ~30° — so re-placing a head hinge silently rescaled the
+> wing data. Wing angles recorded before and after are therefore **not directly
+> comparable**. Each recording folder carries a snapshot of the config that
+> produced it, so an old recording can still be interpreted; the ~9° offset for
+> a given rig is the difference between the two reference directions and can be
+> computed from the hinge positions in that snapshot.
+
+**Head — a captured posture.** The landmark templates *are* the zero: roll,
+pitch and yaw are measured relative to the posture at which they were cut.
+Press `zero` once the fly is settled to re-take it without moving the
+landmarks; that also writes a `zeroed` event into the recording, so the data
+says which posture the angles refer to.
+
+**Abdomen (`tip`)** — geometric like the wings, referenced to the head hinge.
+
+**`autozero`** is honoured only by the `area` and `rotation` trackers. On
+`edge` (wings), `tip` (abdomen) and `landmarks` (head) the key does nothing,
+and Kinefly2 prints a line at startup saying so rather than letting it look
+active. Where it *is* honoured it is not a resting-posture baseline either: it
+slowly re-anchors the reference toward the midpoint of the movement range seen
+so far, which drifts with what the fly happens to do.
+
+**Residual asymmetry.** Even with the geometric baseline right, a resting fly
+will not read exactly L−R = 0 — +1.4° on the reference recording — from real
+wing asymmetry and small hinge-placement error. Nothing subtracts it: the log
+keeps raw angles. Subtract a per-fly offset in analysis if you need to compare
+absolute amplitudes across flies, taking the mean over a quiescent epoch.
+
 ### 2.6 Timing validation
 
 ```bash
@@ -533,8 +576,9 @@ track median in the low milliseconds.
   `radius_inner`/`radius_outer`; the aux ellipse has center and two radius
   handles. `landmarks` parts add draggable landmark points and an **axis
   arrow** (labelled `+pitch`) setting the part's long axis — section 2.5.2.
-  Hinge moves no longer disturb the wing angles: the body frame they are
-  reported in is frozen in `body_axis_deg`.
+  Hinge moves do not disturb the wing angles: each wing is referenced to the
+  other wing's hinge (section 2.5.5), and the body frame is frozen in
+  `body_axis_deg`.
 - **Toolbar:** `exit`; `saveBG` (capture the current image as the background
   for subtraction — do it with the fly absent or not illuminated);
   `autoplace` (place all regions automatically from the current image, see
@@ -629,7 +673,7 @@ apply). Anything missing falls back to `tracker_defaults()`.
 | `rc_background` | Time constant (s) of the moving-average background model. |
 | `wingbeat_min/max` | Expected wingbeat frequency band (Hz) for the aux detector (it uses aliased spectra, so it works at 90 fps). |
 | `view` | `ventral` (camera below the fly) or `frontal` (in front). Decides which rotation the landmark tracker measures exactly, and whether it reports displacement channels at all — section 2.5. |
-| `body_axis_deg` | The body frame the **wing** angles are reported in. Seeded once from the head/abdomen hinges, then frozen, so re-placing a hinge cannot silently shift every wing angle. Delete the key to re-seed it. |
+| `body_axis_deg` | The body frame angles are reported in. Seeded once from the head/abdomen hinges, then frozen, so re-placing a hinge cannot shift it. Delete the key to re-seed it. Each wing's own zero is separate — the line joining the wing hinges, section 2.5.5. |
 
 **Per part** (`head:`, `abdomen:`, `left:`, `right:`, `aux:`)
 
@@ -754,7 +798,7 @@ tests/               synthetic-video generator + ground-truth and architecture t
       layouts, auto-clamped search radius, per-landmark residuals, precision).
 - [x] Landmark head tracking on **both** cameras with per-view channel naming
       (ventral -> yaw exact, frontal -> roll exact) and a per-part axis handle;
-      wing angles decoupled from the head/abdomen hinges (`body_axis_deg`).
+      and `body_axis_deg` freezing the body frame.
 - [x] Ventral view reports yaw only - its pitch/roll channels measured noise
       (SNR 1.9 and 1.2). Untracked parts draw nothing.
 - [x] Per-fly `lever_px` in the experiment YAML, fitted from the fly's own
@@ -766,6 +810,10 @@ tests/               synthetic-video generator + ground-truth and architecture t
 - [x] Stimulus code channel (`/merged/stim`), held per frame, drawn live.
 - [x] Chart-recorder dashboard: fixed per-trace ranges, adjustable window,
       min/max decimation, pause with cursor, reorder/hide, saved layout.
+- [x] Wing zero is the line joining the wing hinges (2026-09-10): a resting fly
+      reads L-R +1.4 deg instead of -17.0, and the head/abdomen hinges no
+      longer affect the wings at all. Supersedes an earlier claim that
+      `body_axis_deg` alone had decoupled them - it had not.
 - [ ] First run against real FLIR cameras: verify ROI and the primary/secondary
       trigger wiring, and confirm 90 Hz on both views at the chosen ROI.
 - [ ] Confirm the lever arm across several flies, and decide whether it can be

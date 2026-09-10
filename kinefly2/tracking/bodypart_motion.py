@@ -95,14 +95,31 @@ class MotionTrackedBodypart(object):
 #         ptBodyCenter_i = get_intersection(pt1,pt2,pt3,pt4)
 #         self.angleBodypart_i = float(np.arctan2(self.ptHinge_i[1]-ptBodyCenter_i[1], self.ptHinge_i[0]-ptBodyCenter_i[0]))
 
-        # Compute the body-outward-facing angle, which is the angle to the current point from the forward body axis.
-        if (self.name in ['head','abdomen']):
-            nameRelative = {'head':'abdomen', 
-                            'abdomen':'head', 
-                            'left':'right', 
-                            'right':'left'}
-            self.angleBodypart_i = float(np.arctan2(self.params['gui'][self.name]['hinge']['y']-self.params['gui'][nameRelative[self.name]]['hinge']['y'], 
-                                                    self.params['gui'][self.name]['hinge']['x']-self.params['gui'][nameRelative[self.name]]['hinge']['x']))
+        # This part's outward-facing direction: the zero its angle is measured
+        # from. Each part is referenced to its OPPOSITE number -- head to
+        # abdomen, and each wing to the other wing -- so a wing's zero is the
+        # line joining the two wing bases. Both wings then share one reference
+        # and a symmetric posture reads L = R.
+        #
+        # Kinefly used to take a wing's reference from the perpendicular of the
+        # head-abdomen hinge line instead, which had two costs, both measured on
+        # a real recording: a resting fly read L-R = -15.6 deg of false
+        # asymmetry (against +2.7 deg here), and moving the HEAD hinge 20 px
+        # shifted the wing angles by 15 deg each, 30 deg in L-R -- so re-placing
+        # a head hinge silently rescaled the wing data. Referencing the wings to
+        # their own two hinges removes that coupling entirely.
+        #
+        # The two conventions coincide when the wing hinges sit symmetrically
+        # about the head-abdomen line, which is why the synthetic test fixture
+        # is unaffected by the change.
+        nameRelative = {'head': 'abdomen',
+                        'abdomen': 'head',
+                        'left': 'right',
+                        'right': 'left'}
+        other = nameRelative.get(self.name)
+        if other is not None:
+            self.angleBodypart_i = float(np.arctan2(self.params['gui'][self.name]['hinge']['y']-self.params['gui'][other]['hinge']['y'], 
+                                                    self.params['gui'][self.name]['hinge']['x']-self.params['gui'][other]['hinge']['x']))
         else:
             ptBodyaxis_i = imageprocessing.get_projection_onto_axis(self.ptHinge_i, (self.ptHingeAbdomen_i, self.ptHingeHead_i))
             self.angleBodypart_i = float(np.arctan2(self.params['gui'][self.name]['hinge']['y']-ptBodyaxis_i[1], 
