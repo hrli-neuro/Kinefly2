@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from ..version import provenance
+
 
 @dataclass
 class Experiment:
@@ -114,6 +116,10 @@ class Experiment:
         d['output_dir'] = self.output_dir
         d['source_path'] = self.source_path
         d['started'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        # Which code and which conventions produced this recording. The config
+        # snapshot alone cannot say: the wing zero changed on 2026-09-10 without
+        # any YAML changing with it.
+        d['provenance'] = provenance()
         return d
 
     def write_resolved(self):

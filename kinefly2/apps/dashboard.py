@@ -64,6 +64,17 @@ class StateBuffer:
         """Flatten one published state into the channels the page plots."""
         row = {'t': state['t_host'], 'seq': state['seq'],
                'stim': state.get('stim')}
+        # How old each camera's contribution was at the merge, in ms, and which
+        # cameras were too old to trust. A stale camera's measurements arrive
+        # here already blanked, so this is what says the gap is a stalled
+        # camera rather than a fly that stopped moving.
+        ages = state.get('ages') or {}
+        limit = state.get('stale_after_s')
+        stale = [c for c, a in sorted(ages.items())
+                 if a is not None and limit is not None and a > limit]
+        row['stale'] = ','.join(stale) if stale else None
+        for cam, age in ages.items():
+            row['%s/lag_ms' % cam] = None if age is None else age * 1e3
         for cam, cs in (state.get('cameras') or {}).items():
             parts = cs.get('parts') or {}
             for part in PARTS:
@@ -122,6 +133,7 @@ header{display:flex;align-items:center;gap:14px;padding:7px 12px;border-bottom:1
  position:sticky;top:0;background:var(--bg);z-index:5;flex-wrap:wrap}
 h1{font-size:14px;margin:0;font-weight:600}
 #status{color:#8c8}
+#stale{color:#fff;background:#a22;padding:2px 7px;border-radius:3px;margin-left:8px;display:none}
 button,select{background:#222;color:var(--fg);border:1px solid #444;border-radius:4px;
  padding:2px 7px;font:12px system-ui;cursor:pointer}
 button:hover{background:#2c2c2c}
@@ -139,7 +151,7 @@ canvas{width:100%;height:104px;display:block;cursor:crosshair}
 #hidden button{margin:2px 3px 0 0;opacity:.75}
 </style></head><body>
 <header>
-  <h1>Kinefly2 live</h1><span id="status">connecting…</span>
+  <h1>Kinefly2 live</h1><span id="status">connecting…</span><span id="stale"></span>
   <label>window <select id="win">
     <option value="5">5 s</option><option value="10">10 s</option>
     <option value="30" selected>30 s</option><option value="60">60 s</option>
@@ -172,11 +184,20 @@ const CHANNELS=[
  {id:'wbf',   title:'Wingbeat frequency (bottom)', unit:'Hz', keys:[{k:'bottom/wbf',c:'#f96',lbl:'wbf'}], def:[150,250]},
  {id:'q',     title:'Match quality', unit:'',
   keys:[{k:'bottom/head_q',c:'#7a7',lbl:'bottom'},{k:'front/head_q',c:'#a7a',lbl:'front'}], def:[0,1]},
+ {id:'lag',   title:'Camera lag', unit:'ms', hidden:true,
+  keys:[{k:'bottom/lag_ms',c:'#999',lbl:'bottom'},{k:'front/lag_ms',c:'#c99',lbl:'front'}], def:[0,60]},
 ];
 const LS='kinefly2.dash.v1';
 let cfg=load();
-function load(){ try{const o=JSON.parse(localStorage.getItem(LS)); if(o&&o.panels) return o;}catch(e){} return blank(); }
-function blank(){ return {win:30, panels:CHANNELS.map(c=>({id:c.id,lo:c.def[0],hi:c.def[1],show:null}))}; }
+function load(){ try{const o=JSON.parse(localStorage.getItem(LS)); if(o&&o.panels) return reconcile(o);}catch(e){} return blank(); }
+function newPanel(c){ return {id:c.id,lo:c.def[0],hi:c.def[1],show:c.hidden?false:null}; }
+function blank(){ return {win:30, panels:CHANNELS.map(newPanel)}; }
+// A saved layout predates any channel added since. Without this the new one
+// would never appear and could not even be un-hidden.
+function reconcile(o){
+  for(const c of CHANNELS) if(!o.panels.some(p=>p.id===c.id)) o.panels.push(newPanel(c));
+  return o;
+}
 function save(){ try{localStorage.setItem(LS,JSON.stringify(cfg));}catch(e){} }
 function specOf(id){ return CHANNELS.find(c=>c.id===id); }
 function panelOf(id){ return cfg.panels.find(p=>p.id===id); }
@@ -333,6 +354,11 @@ es.onmessage=e=>{
   while(data.length&&last.t-data[0].t>keep)data.shift();
   const dt=(performance.now()-rate.t)/1000;
   if(dt>2){document.getElementById('status').textContent=`${((n-rate.n)/dt).toFixed(0)} states/s`;rate={t:performance.now(),n:n};}
+  // A camera too old to trust: its traces are already blank, and this says the
+  // gap is a stalled camera rather than a fly holding still.
+  const sb=document.getElementById('stale');
+  if(last&&last.stale){ sb.textContent=`${last.stale} STALE`; sb.style.display='inline'; }
+  else sb.style.display='none';
   // First data in: hide panels that carry nothing, so a one-camera session
   // is not half empty. The user's own choices are never overridden.
   if(!window._autoHid&&data.length>60){ window._autoHid=true;

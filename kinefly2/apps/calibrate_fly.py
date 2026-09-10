@@ -145,7 +145,7 @@ def main():
     fit = calibrate.fit_lever(shift, ref, mask=mask)
     ok, why = calibrate.check_fit(fit)
     print()
-    print(calibrate.report(fit, ok, why))
+    print(calibrate.report(fit, ok, why, log=log))
 
     # Is the axis pointing the right way? A wrong axis swaps pitch and yaw and
     # has no other symptom, so check it rather than trusting it.

@@ -21,6 +21,7 @@ recording overrides fields (fly id, protocol, notes, video on/off).
 import argparse
 import os
 import sys
+import threading
 import time
 
 import cv2
@@ -35,6 +36,7 @@ from ..gui.app import TrackerView
 from ..output.command_server import CommandServer
 from ..output.event_receiver import EventReceiver
 from ..output.zmq_pub import ZmqPublisher
+from ..version import code_version, is_dirty
 
 DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), 'experiments', 'default.yaml')
@@ -69,6 +71,9 @@ def main():
                     help='Use only these cameras (e.g. --cameras bottom)')
     ap.add_argument('--no-gui', action='store_true')
     ap.add_argument('--no-commands', action='store_true', help='Disable the command socket')
+    ap.add_argument('--no-lockstep', action='store_true',
+                    help='Video playback: do not hold the cameras to the same frame '
+                         'index (they then drift apart at their own tracking speeds)')
     g = ap.add_argument_group('experiment template (defaults for recordings)')
     g.add_argument('--exp', metavar='YAML', help='Experiment template (default: experiments/default.yaml)')
     g.add_argument('--data-root', dest='data_root')
@@ -101,19 +106,40 @@ def main():
                                           'events_port': args.events_port,
                                           'record_video': args.record_video})
 
-    merger = StateMerger(primary=primary)
+    views, sources = {}, {}
+    for name, cfg_path in cameras.items():
+        views[name] = TrackerView(name, cfg_path, use_gui=use_gui)
+        with open(cfg_path) as f:
+            cam_cfg = (yaml.safe_load(f) or {}).get('camera') or {}
+        sources[name] = make_source(cam_cfg)
+        sources[name].open()
+
+    # How old a secondary camera's state may be before its measurements are
+    # dropped instead of repeated. Default: five frame intervals of the primary
+    # camera (55 ms at 90 Hz) -- long enough to ride out a hiccup, short enough
+    # that a stall cannot masquerade as a fly holding still.
+    stale_after_s = rig.get('stale_after_s')
+    if stale_after_s is None:
+        fps = getattr(sources[primary], 'fps', None)
+        stale_after_s = 5.0 / fps if fps else 0.06
+
+    merger = StateMerger(primary=primary, stale_after_s=stale_after_s)
     if rig.get('zmq_port'):
         merger.add_sink(ZmqPublisher(port=int(rig['zmq_port'])))
 
-    views, pipelines = {}, {}
-    for name, cfg_path in cameras.items():
-        view = TrackerView(name, cfg_path, use_gui=use_gui)
-        with open(cfg_path) as f:
-            cam_cfg = (yaml.safe_load(f) or {}).get('camera') or {}
-        source = make_source(cam_cfg)
-        source.open()
-        views[name] = view
-        pipelines[name] = CameraPipeline(view, source, merger, render=use_gui)
+    # Lockstep applies to video playback only. Recorded files are already
+    # frame-synchronised, so the only thing that can pull them apart is the
+    # trackers costing different amounts per frame; a barrier holds them to the
+    # same frame index. Live cameras must never do this -- one camera hiccuping
+    # would stall the other -- and use the hardware trigger instead.
+    replaying = all(not getattr(src, 'reconnectable', False) for src in sources.values())
+    lockstep = replaying and len(sources) > 1 and not args.no_lockstep
+    barrier = threading.Barrier(len(sources)) if lockstep else None
+
+    pipelines = {}
+    for name, view in views.items():
+        pipelines[name] = CameraPipeline(view, sources[name], merger, render=use_gui,
+                                         barrier=barrier, is_primary=(name == primary))
 
     events = EventReceiver(template.events_port) if template.events_port else None
     session = RecordingSession(template, merger, pipelines, views=views, events=events,
@@ -140,6 +166,16 @@ def main():
         view.on_zeroed = log_zeroed(name)
 
     print('Kinefly2 up: cameras %s, primary %s' % (', '.join(cameras), primary))
+    print('  code:      %s' % code_version())
+    if is_dirty():
+        print('             (uncommitted changes -- recordings are stamped "-dirty",')
+        print('              so this exact code cannot be checked out again)')
+    print('  stale:     blank a camera older than %.0f ms' % (stale_after_s * 1e3))
+    if lockstep:
+        print('  lockstep:  on (video replay; %s frame N pairs with %s frame N)'
+              % (primary, ', '.join(n for n in sources if n != primary)))
+    elif replaying and len(sources) > 1:
+        print('  lockstep:  off -- the cameras will drift apart at their own speeds')
     if rig.get('zmq_port'):
         print('  fly state: ZMQ PUB tcp://*:%s' % rig['zmq_port'])
     if commands is not None:
@@ -160,8 +196,15 @@ def main():
             if any(v.bQuit for v in views.values()):
                 break
             rec = session.status().get('session') if session.recording else None
+            # Whatever is stale right now, shown in every window: a stalled
+            # camera's own window is frozen, so the warning has to appear
+            # somewhere that is still updating.
+            ages = merger.ages()
+            stale = [(c, a) for c, a in sorted(ages.items())
+                     if c != primary and a > stale_after_s]
             for v in views.values():
                 v.rec_status = rec
+                v.peer_status = stale or None
             if use_gui:
                 for p in pipelines.values():
                     img = p.latest_display()
@@ -194,8 +237,14 @@ def main():
         merger.close()
         cv2.destroyAllWindows()
 
+    stale_counts = merger.stale_counts()
     for n, p in pipelines.items():
-        print('  %s: %d frames tracked, %d reconnects' % (n, p.n_frames, p.n_reconnects))
+        line = '  %s: %d frames tracked, %d reconnects' % (n, p.n_frames, p.n_reconnects)
+        if stale_counts.get(n):
+            line += ', %d rows blanked as stale' % stale_counts[n]
+        if p.desynced:
+            line += ' (stopped: lockstep partner left)'
+        print(line)
     if session.last_summary:
         s = session.last_summary
         print('  last recording: %s  %.1f s, %d rows, %d events -> %s' % (

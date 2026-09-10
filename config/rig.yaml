@@ -8,6 +8,11 @@ cameras:
     config: camera_front.yaml
     enabled: true
 primary: bottom                # This camera's updates drive the merged output.
+# How old a secondary camera's state may be before its measurements are logged
+# as NaN instead of being repeated. Blank/absent = 5 frame intervals of the
+# primary camera (55 ms at 90 Hz). A repeated value is indistinguishable from
+# real data downstream; a gap is honest, and <cam>/age records how long it was.
+# stale_after_s: 0.055
 use_gui: true
 zmq_port: 5556                 # Merged fly state published as JSON on tcp://*:5556.
 command_port: 5558             # Command socket: experiment scripts start/stop recordings (kinefly2.client).

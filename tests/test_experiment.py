@@ -168,8 +168,53 @@ def test_recording_pipeline_and_events():
     print('recording OK: %s  (retrack r=%.4f)' % (exp.output_dir, r))
 
 
+def test_provenance_is_stamped_and_never_fails():
+    """A recording must say which code and which conventions produced it. The
+    config snapshot cannot: on 2026-09-10 the wing zero changed from the
+    head-abdomen perpendicular to the wing-base line, shifting every wing angle
+    by ~15 degrees while the YAML stayed byte-identical."""
+    import yaml
+
+    from kinefly2.core.experiment import Experiment
+    from kinefly2.version import CONVENTIONS, code_version, provenance
+
+    p = provenance()
+    for key in ('code_version', 'kinefly2_version', 'conventions', 'python', 'host'):
+        assert key in p, key
+    assert p['conventions']['wing_zero'] == 'wing_base_line', p['conventions']
+    assert CONVENTIONS['angle_units'] == 'radians'
+
+    root = tempfile.mkdtemp()
+    exp = Experiment.load(None, {'data_root': root, 'date': '260910',
+                                 'genotype': 'syn', 'fly_id': '001', 'protocol': 'prov'})
+    exp.make_output_dir()
+    exp.write_resolved()
+    with open(exp.path('_experiment.yaml')) as f:
+        written = yaml.safe_load(f)
+    assert written['provenance']['code_version'] == p['code_version']
+    assert written['provenance']['conventions']['wing_zero'] == 'wing_base_line'
+
+    # A copy with no git history still records -- it just says so, rather than
+    # raising in the middle of starting a recording. Point the module at a
+    # directory that is not a checkout and ask again.
+    import kinefly2.version as v
+    saved_file, saved_cache = v.__file__, v._cached
+    try:
+        v._cached = None
+        v.__file__ = os.path.join(tempfile.mkdtemp(), 'version.py')
+        fallback = v.code_version()
+    finally:
+        v.__file__, v._cached = saved_file, saved_cache
+    assert fallback and 'no git' in fallback, fallback
+    assert code_version() == p['code_version'], 'the cache must survive the probe'
+    print('provenance: %s, conventions %s' % (
+        p['code_version'], ', '.join('%s=%s' % kv for kv in sorted(p['conventions'].items()))))
+    print('  no-git fallback: %s' % fallback)
+
+
 if __name__ == '__main__':
     test_naming_and_collision()
     test_yaml_and_override_precedence()
+    test_provenance_is_stamped_and_never_fails()
     test_recording_pipeline_and_events()
     print('OK')

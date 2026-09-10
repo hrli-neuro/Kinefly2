@@ -15,6 +15,7 @@ import cv2
 from .experiment import Experiment
 from ..output.logger import Hdf5Logger
 from ..output.video_recorder import VideoRecorder
+from ..version import provenance
 
 
 class RecordingSession:
@@ -72,7 +73,8 @@ class RecordingSession:
                 # landmark positions it was meant for. A lever arm fitted for a
                 # different set of points is silently wrong, so calibrate_fly
                 # compares these before reusing one.
-                meta = {'lever_px': exp.lever_px or {}, 'landmarks': {}}
+                meta = {'lever_px': exp.lever_px or {}, 'landmarks': {},
+                        **provenance()}
                 for cam, view in self.views.items():
                     if hasattr(view, 'landmark_geometry'):
                         meta['landmarks'][cam] = view.landmark_geometry()
@@ -92,7 +94,8 @@ class RecordingSession:
                 self.events.attach(logger, exp.path('_events.jsonl'))
             self.active = {'exp': exp, 'logger': logger, 'recorders': recorders,
                            't_start': time.monotonic(), 'wall_start': time.time(),
-                           'frames_start': {n: p.n_frames for n, p in self.pipelines.items()}}
+                           'frames_start': {n: p.n_frames for n, p in self.pipelines.items()},
+                           'stale_start': self.merger.stale_counts()}
             self.n_sessions += 1
             print('REC start: %s -> %s' % (exp.run_name, exp.output_dir))
             return {'name': exp.run_name, 'output_dir': exp.output_dir}
@@ -114,8 +117,12 @@ class RecordingSession:
             summary = self._summary(a, final=True)
             self.active = None
             self.last_summary = summary
-            print('REC stop: %s  %.1f s, %d rows, %d events' % (
-                summary['name'], summary['duration'], summary['rows'], summary['events']))
+            msg = 'REC stop: %s  %.1f s, %d rows, %d events' % (
+                summary['name'], summary['duration'], summary['rows'], summary['events'])
+            if summary['stale']:
+                msg += '  STALE %s' % ', '.join('%s=%d rows' % kv
+                                                for kv in sorted(summary['stale'].items()))
+            print(msg)
             return summary
 
     def _summary(self, a, final=False):
@@ -127,6 +134,12 @@ class RecordingSession:
              'video': {n: {'written': r.n_written, 'dropped': r.n_dropped}
                        for n, r in a['recorders'].items()},
              'frames': {n: p.n_frames - a['frames_start'][n] for n, p in self.pipelines.items()}}
+        # Rows in which a camera was too old to trust and was logged as NaN.
+        # Anything but zero here is worth knowing before the fly is discarded.
+        now = self.merger.stale_counts()
+        s['stale'] = {n: now.get(n, 0) - a['stale_start'].get(n, 0)
+                      for n in set(now) | set(a['stale_start'])}
+        s['stale'] = {n: v for n, v in s['stale'].items() if v}
         return s
 
     def status(self):

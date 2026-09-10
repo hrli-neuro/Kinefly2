@@ -139,6 +139,7 @@ class TrackerView:
         self.on_zeroed = None      # Callback(summary) after zero_all (run_rig logs an event).
         self.placingLandmark = None   # Part name while waiting for a click to add a landmark.
         self.rec_status = None     # Dict from RecordingSession.status()['session'] while recording.
+        self.peer_status = None    # [(camera, age_s)] of cameras whose data is currently stale.
 
         self.bMousing = False
         self.bValidImage = False
@@ -546,6 +547,18 @@ class TrackerView:
                             y -= h_text + self.h_gap
                             cv2.putText(imgOutput, line, (x, y), self.fontface,
                                         self.scaleText, part.bgra)
+
+            # A camera whose frames have stopped: its own window is frozen, so
+            # the warning is drawn in every window. Its measurements are being
+            # logged as NaN, not repeated -- this says why the trace has a gap.
+            stale = self.peer_status
+            if stale:
+                yS = self.yToolbar + int(14 * self.scale)
+                if self.rec_status is not None:
+                    yS += int(14 * self.scale)
+                s = '  '.join('%s STALE %.2fs' % (cam, age) for cam, age in stale)
+                cv2.putText(imgOutput, s, (int(12 * self.scale), yS + int(4 * self.scale)),
+                            self.fontface, self.scaleText, (0, 0, 255))
 
             rec = self.rec_status
             if rec is not None:

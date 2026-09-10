@@ -58,11 +58,23 @@ def load_log(path, cameras=('bottom', 'front')):
 
     Returns every '<camera>/<column>' dataset plus 'merged/*', and the event
     table under 'events/*'. Angles stay in radians, as stored.
+
+    'attrs' holds the file attributes -- the code version, the measurement
+    conventions, the lever arm and landmark positions in force when it was
+    recorded. Worth reading before comparing two files: the wing zero changed
+    on 2026-09-10 without any config changing with it.
     """
+    import json
+
     import h5py
 
-    out = {}
+    out = {'attrs': {}}
     with h5py.File(path, 'r') as f:
+        for key, value in f.attrs.items():
+            try:
+                out['attrs'][key] = json.loads(value)
+            except (ValueError, TypeError):
+                out['attrs'][key] = value
         for group in list(cameras) + ['merged']:
             if group not in f:
                 continue
@@ -230,12 +242,29 @@ def check_fit(fit, min_range_deg=5.0, min_r2=0.5, max_ci_frac=0.20, min_n=1000):
     return (not why), why
 
 
-def report(fit, ok=None, why=None):
+def provenance_lines(log):
+    """What produced this recording, for the head of a report. Older files
+    predate the stamping and say so rather than guessing."""
+    attrs = (log or {}).get('attrs') or {}
+    version = attrs.get('code_version')
+    if not version:
+        return ['recorded by:  unknown (this file predates provenance stamping)']
+    lines = ['recorded by:  Kinefly2 %s' % version]
+    conv = attrs.get('conventions') or {}
+    if conv:
+        lines.append('conventions:  %s' % ', '.join('%s=%s' % kv for kv in sorted(conv.items())))
+    return lines
+
+
+def report(fit, ok=None, why=None, log=None):
     """Human-readable summary, including the line to paste into the config."""
     if ok is None:
         ok, why = check_fit(fit)
     lo, hi = fit['ci']
-    lines = [
+    lines = []
+    if log is not None:
+        lines += provenance_lines(log) + ['']
+    lines += [
         'lever_px    = %.1f px/rad  (95%% CI %.1f .. %.1f)' % (fit['lever_px'], lo, hi),
         '            = %.2f px per degree' % (fit['lever_px'] * math.pi / 180),
         'r2          = %.3f   over n = %d frames' % (fit['r2'], fit['n']),

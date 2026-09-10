@@ -11,6 +11,17 @@ Layout, one row per merged state (angles in RADIANS; the GUI displays degrees):
     /merged/stim_t_wall                     time.time() when that value last changed, so
                                             stimulus update latency stays visible
     /<camera>/seq, t_camera, t_host, t_done
+    /<camera>/age                           how old this camera's contribution was when the
+                                            row was merged, in seconds. ~0 for the primary
+                                            camera (its frame triggered the merge); for a
+                                            secondary it is under one frame interval when
+                                            healthy. Past the rig's `stale_after_s` the
+                                            merger blanks that camera's measurements to NaN
+                                            rather than repeating them, and this column is
+                                            how long the gap lasted. Comparing `seq` between
+                                            two cameras is the other check: with a hardware
+                                            trigger (or lockstep replay) they advance
+                                            together.
     /<camera>/<part>_angle, <part>_radius   for head, abdomen, left, right
     /<camera>/aux_intensity, /<camera>/aux_freq
     /<camera>/head_dx, head_dy              head translation, px (landmarks tracker)
@@ -85,7 +96,7 @@ class Hdf5Logger(FlystateSink):
         add('merged/stim')          # stimulus code in force on this frame
         add('merged/stim_t_wall')   # when it last changed (time.time())
         for cam in self.cameras:
-            for col in ('seq', 't_camera', 't_host', 't_done'):
+            for col in ('seq', 't_camera', 't_host', 't_done', 'age'):
                 add('%s/%s' % (cam, col))
             for part in PARTS:
                 add('%s/%s_angle' % (cam, part))
@@ -119,7 +130,7 @@ class Hdf5Logger(FlystateSink):
         for cam in self.cameras:
             cs = merged.cameras.get(cam)
             if cs is None:
-                for col in ('seq', 't_camera', 't_host', 't_done'):
+                for col in ('seq', 't_camera', 't_host', 't_done', 'age'):
                     row['%s/%s' % (cam, col)] = math.nan
                 for part in PARTS:
                     row['%s/%s_angle' % (cam, part)] = math.nan
@@ -133,6 +144,10 @@ class Hdf5Logger(FlystateSink):
             row['%s/t_camera' % cam] = cs.t_camera
             row['%s/t_host' % cam] = cs.t_host
             row['%s/t_done' % cam] = cs.t_done
+            # A stale camera arrives here with no parts at all (the merger
+            # blanked it), so every measurement below falls through to NaN
+            # while seq/t_camera/age stay to say what happened.
+            row['%s/age' % cam] = merged.age(cam)
             for part in PARTS:
                 ps = cs.parts.get(part)
                 row['%s/%s_angle' % (cam, part)] = ps.angle if ps else math.nan

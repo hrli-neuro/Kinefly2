@@ -19,7 +19,7 @@ def strict_loads(text):
     return json.loads(text, parse_constant=boom)
 
 
-def state(view, calibrated=False, seq=0):
+def state(view, calibrated=False, seq=0, ages=None, stale_after_s=None):
     """A published state shaped like MergedFlyState.to_dict()."""
     nan = float('nan')
     if view == 'ventral':
@@ -33,6 +33,8 @@ def state(view, calibrated=False, seq=0):
     cam = 'bottom' if view == 'ventral' else 'front'
     return {
         'seq': seq, 't_host': float(seq) / 90.0, 'stim': 2.5, 'stim_t_wall': 1.0,
+        'ages': ages if ages is not None else {cam: 0.004},
+        'stale_after_s': stale_after_s if stale_after_s is not None else 0.055,
         'cameras': {cam: {'camera': cam, 'seq': seq, 't_camera': nan,
                           't_host': 0.0, 't_done': 0.0,
                           'parts': {
@@ -104,6 +106,46 @@ def test_channels_follow_the_view():
     assert abs(v['bottom/left'] - 50.0) < 1e-6, v['bottom/left']
     assert v['bottom/right'] is None, 'NaN angle must be a gap, not 0'
     assert v['stim'] == 2.5 and v['bottom/wbf'] == 201.0
+
+
+def test_camera_lag_and_stale_badge():
+    """A stalled camera arrives with its measurements already blanked, so the
+    page needs the lag and the stale marker to say why the trace has a gap --
+    otherwise it reads as a fly holding still."""
+    healthy = StateBuffer.row_from_state(
+        state('ventral', ages={'bottom': 0.004, 'front': 0.011}, stale_after_s=0.055))
+    assert healthy['stale'] is None
+    assert abs(healthy['bottom/lag_ms'] - 4.0) < 1e-6, healthy['bottom/lag_ms']
+    assert abs(healthy['front/lag_ms'] - 11.0) < 1e-6
+
+    stalled = StateBuffer.row_from_state(
+        state('ventral', ages={'bottom': 0.004, 'front': 0.42}, stale_after_s=0.055))
+    assert stalled['stale'] == 'front', stalled['stale']
+    assert abs(stalled['front/lag_ms'] - 420.0) < 1e-6
+
+    # An older publisher sends no ages at all; the page must still work.
+    bare = dict(state('ventral'))
+    bare.pop('ages'), bare.pop('stale_after_s')
+    row = StateBuffer.row_from_state(bare)
+    assert row['stale'] is None and 'bottom/lag_ms' not in row
+    strict_loads(json.dumps([healthy, stalled, row]))
+    print('lag/stale: front %.0f ms flagged stale, %.0f ms not' % (
+        stalled['front/lag_ms'], healthy['front/lag_ms']))
+
+
+def test_new_channels_survive_a_saved_layout():
+    """A saved layout predates any channel added since. Without reconcile()
+    the new one could never appear, not even in the hidden bar."""
+    import re
+
+    from kinefly2.apps import dashboard
+
+    ids = re.findall(r"\{id:'(\w+)'", dashboard.PAGE)
+    assert 'lag' in ids, ids
+    assert 'function reconcile(' in dashboard.PAGE
+    assert 'o.panels.push(newPanel(c))' in dashboard.PAGE
+    assert "show:c.hidden?false:null" in dashboard.PAGE, 'hidden channels must start hidden'
+    print('page defines %d channels including lag, and reconciles saved layouts' % len(ids))
 
 
 def test_decimation_preserves_extremes():
@@ -188,6 +230,8 @@ if __name__ == '__main__':
     test_payload_is_strictly_valid_json()
     test_clean_handles_nested_and_scalars()
     test_channels_follow_the_view()
+    test_camera_lag_and_stale_badge()
+    test_new_channels_survive_a_saved_layout()
     test_decimation_preserves_extremes()
     test_buffer_trims_to_its_window()
     test_camera_config_plumbing()

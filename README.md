@@ -146,7 +146,7 @@ Two settings matter more than they look:
   running cameras drift, so a frame from one can sit up to a frame away from
   the other's. That matters here specifically because the two views are
   compared directly: the front camera's lever arm is calibrated against the
-  bottom camera's angle (section 2.3.1), and the r = 0.97 that calibration
+  bottom camera's angle (section 2.3.2), and the r = 0.97 that calibration
   achieved came from two views that *were* frame-synchronised. Wire the
   primary's strobe line to the secondary's trigger input per FLIR's GPIO
   pinout for your model.
@@ -254,7 +254,50 @@ Events are stamped on arrival with the fly-state clock (`t_host`) and
 wall-clock time (`t_wall`) and written to `/events` in the HDF5 and to the
 `.jsonl`. Events arriving while no recording is active are counted and dropped.
 
-#### 2.3.1 Per-fly calibration: `lever_px`
+#### 2.3.1 How the two cameras are paired in time
+
+There is no timestamp interpolation. Each merged row is created by the
+**primary** camera (`primary:` in `rig.yaml`) and carries whichever state each
+other camera delivered most recently. When both cameras run at the same rate
+that is the correct partner and the pairing error is under one frame — but the
+error is *biased*, because a secondary sample is always older than the
+primary's, never newer. That bias lands on exactly the cross-camera comparison
+`lever_px` is fitted from, so it is worth getting right:
+
+**On the rig — one frame rate, enforced in hardware.** Set the same `fps` on
+both cameras and wire the trigger: `trigger: {mode: primary}` on one and
+`trigger: {mode: secondary}` on the other (section 2.1.1). Frame *N* of one is
+then genuinely simultaneous with frame *N* of the other.
+
+**Replaying video files — lockstep, on by default.** Two recorded files are
+already frame-synchronised, but the bottom view (four parts + the wingbeat
+detector) and the front view (landmark matching) do not cost the same to
+track, so free-running threads slide apart in frame index. Measured on a
+74 s pair of 4449-frame files, the front camera finished while the bottom was
+at frame 2941 — the two views were **943 frames apart on average, 1711 at
+worst**, so every row compared head yaw with a head roll from ~16 s later.
+
+`run_rig` therefore holds file sources to the same frame index automatically
+(`lockstep: on` in the startup banner) and replay stays as fast as the slower
+tracker allows — no pacing, no real-time throttling. `--no-lockstep` turns it
+off. It is never applied to live cameras: there, one camera hiccuping must not
+stall the other. (To replay at true speed instead, set `pace: true` in the
+camera YAML.)
+
+**Staleness: gaps, not repeats.** Whatever the pairing, `<cam>/age` records how
+old each camera's contribution was when the row was merged. Past
+`stale_after_s` (in `rig.yaml`; default five frame intervals of the primary
+camera, 55 ms at 90 Hz) that camera's measurements are written as **NaN**
+instead of being repeated, while its `seq` and timestamps stay so the stale
+frame is still identifiable. A repeated value is indistinguishable from a fly
+holding still; a gap is honest. The GUI shows `front STALE 0.13s`, the
+dashboard shows a red badge and a `Camera lag` trace, and `REC stop` reports
+how many rows were affected.
+
+Comparing `bottom/seq` with `front/seq` is the other check, and the one that
+catches index drift: with a hardware trigger or lockstep they advance together.
+
+#### 2.3.2 Per-fly calibration: `lever_px`
 
 The front camera's pitch and yaw channels are pixels until you supply one
 constant per fly. It depends on head size, mounting **and landmark placement**,
@@ -339,7 +382,7 @@ true envelope instead of an aliased subsample. A brief spike is never skipped.
 Channel names come from the tracker's own `extra`, so they mean what they say
 whatever the camera view: a ventral camera shows only its exact yaw, and a
 frontal camera shows roll plus pitch and yaw — in **degrees** once that fly's
-`lever_px` is set (section 2.3.1) and in **pixels** before that. Reading the
+`lever_px` is set (section 2.3.2) and in **pixels** before that. Reading the
 raw image-axis displacement instead would mislabel both channels on any camera
 whose axis is not aligned with the frame.
 
@@ -486,7 +529,7 @@ cannot be measured from the view itself, so the channels are recorded in
 **pixels**. The exact in-plane angle is unaffected.
 
 The constant depends on head size, mounting **and landmark placement**, so it
-is **per fly** — see §2.3.1.
+is **per fly** — see §2.3.2.
 
 #### 2.5.4 Outputs
 
@@ -621,7 +664,7 @@ its own reference.
 | `config/camera_front.yaml` | Same, for the front view. Note it holds no `lever_px`: that is per fly, not per rig. |
 | `config/background_<name>.png` | Per-camera background image, written by `saveBG` or `--make-bg`. |
 | `config/reference_<name>.png` | Per-camera reference frame for `autoplace` (saved with the params). |
-| `experiments/*.yaml` | Per-recording settings: data root, genotype/fly/protocol, notes, video on/off, event port (section 2.3), and **`lever_px`, the per-fly head calibration** (section 2.3.1). |
+| `experiments/*.yaml` | Per-recording settings: data root, genotype/fly/protocol, notes, video on/off, event port (section 2.3), and **`lever_px`, the per-fly head calibration** (section 2.3.2). |
 | `kinefly2/gui/app.py` → `tracker_defaults()` | Defaults used for any tracker parameter missing from a camera YAML. |
 | `<data_root>/<date>/<name>/` | Recording folder (HDF5, videos, events, resolved settings, config snapshot). |
 | `tests/videos/*` | Auto-generated synthetic test fixtures — regenerated by the tests, don't tune configs here. |
@@ -638,6 +681,8 @@ primary: bottom               # this camera's updates drive the merged output
 use_gui: true
 zmq_port: 5556                # remove/comment to disable the publisher
 command_port: 5558            # command socket for experiment scripts (kinefly2.client)
+stale_after_s: 0.055          # blank a camera older than this instead of repeating it;
+                              # omit = 5 frame intervals of the primary camera (section 2.3.1)
 ```
 
 ### 3.2 `camera:` section of a camera YAML — capture settings
@@ -684,7 +729,7 @@ apply). Anything missing falls back to `tracker_defaults()`.
 | `threshold` | Edge-strength threshold (edge tracker); 0 = accept all. |
 | `feathering` | Softening of mask edges (0–1). |
 | `search_deg` | `rotation` tracker only: half-range of the rotation search in degrees (default 8). |
-| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px` | `landmarks` tracker only: patch size; search radius (**auto-clamped** so the matcher cannot reach a neighbouring landmark — see 2.5.1); acceptance threshold; `rigid`/`similarity` fit; rotated re-matching for large rolls; output EMA; and the fit residual above which the overlay warns `NON-RIGID`. Landmark positions and the axis live in `gui.<part>.landmarks` / `gui.<part>.axis_deg`. The px-per-radian constant `lever_px` is **not** here: it is per fly and lives in the experiment YAML (section 2.3.1). |
+| `template_px`, `search_px`, `min_score`, `fit`, `rotate_templates`, `smooth`, `nonrigid_px` | `landmarks` tracker only: patch size; search radius (**auto-clamped** so the matcher cannot reach a neighbouring landmark — see 2.5.1); acceptance threshold; `rigid`/`similarity` fit; rotated re-matching for large rolls; output EMA; and the fit residual above which the overlay warns `NON-RIGID`. Landmark positions and the axis live in `gui.<part>.landmarks` / `gui.<part>.axis_deg`. The px-per-radian constant `lever_px` is **not** here: it is per fly and lives in the experiment YAML (section 2.3.2). |
 | `polar_amplify` | Angular resolution multiplier of the polar transform (default 1.0). Raise (2–4) to resolve small rotations (e.g. head roll of a few degrees) at the cost of ~1–3 ms/frame for that part. |
 | `saturation_correction` | Compensate saturated pixels when background-subtracting. |
 
@@ -706,8 +751,11 @@ apply). Anything missing falls back to `tracker_defaults()`.
 ### 3.4 Data file layout (`logs/*.h5`)
 
 One row per merged state: `/merged/seq`, `/merged/t_host`, `/merged/t_wall`, and per camera
-`/<cam>/seq`, `t_camera`, `t_host`, `t_done`, `/<cam>/<part>_angle` and
+`/<cam>/seq`, `t_camera`, `t_host`, `t_done`, `/<cam>/age`, `/<cam>/<part>_angle` and
 `_radius` for head/abdomen/left/right, `/<cam>/aux_intensity`, `aux_freq`.
+`age` is how old that camera's contribution was when the row was merged (s);
+past `stale_after_s` its measurements are NaN rather than repeated, and `seq`
+stops advancing — see section 2.3.1.
 With the `landmarks` tracker on the head, also `/<cam>/head_dx`, `head_dy`
 (raw translation, px), `head_dx_corr` / `head_dy_corr` (rotation-induced part
 removed, image axes), **`head_d_axial`** and **`head_d_lateral`** (the same
@@ -717,12 +765,24 @@ shift along and across the part's own axis, px), `head_fit_residual`,
 analysis need not know the view. Exactly one of those three is always finite
 (the exact in-plane angle: yaw for a ventral camera, roll for a frontal one);
 on a frontal camera the other two fill in once `lever_px` is known (section
-2.3.1); on a ventral camera they stay NaN by design, as do its `head_d_axial`
+2.3.2); on a ventral camera they stay NaN by design, as do its `head_d_axial`
 and `head_d_lateral` — the column set is kept uniform across cameras. All NaN
 for other trackers.
 Times are seconds (host clock is monotonic; `t_camera` is the device clock;
 `t_wall` is `time.time()`). Events: `/events/t_host`, `/events/t_wall`,
 `/events/text`. Readable with h5py or MATLAB's `h5read`.
+
+**File attributes — what produced the numbers.** Every recording carries
+`code_version` (a `git describe` of the checkout, `-dirty` when it had
+uncommitted changes), `kinefly2_version`, `python`, `host`, and `conventions`:
+the measurement conventions in force, currently
+`wing_zero=wing_base_line`, `head_zero=landmark_templates`,
+`angle_units=radians`. The config snapshot cannot supply this — on 2026-09-10
+the wing zero changed from the head–abdomen perpendicular to the wing-base
+line, shifting every wing angle by ~15° while the YAML stayed byte-identical
+(section 2.5.5). `calibrate.load_log()` returns them under `'attrs'`, and
+`calibrate_fly` prints them at the head of its report. Recordings made before
+this stamping have no such attributes and say so.
 
 **Units.** Angles are **radians** everywhere they are stored or streamed
 (HDF5, ZMQ, the CSV from `run_offline`), as in the original Kinefly. The GUI
@@ -771,6 +831,7 @@ kinefly2/core/       CameraPipeline (per-camera thread), StateMerger, flystate d
 kinefly2/output/     FlystateSink interface, ZMQ publisher, HDF5 logger; future panels driver
 kinefly2/gui/        TrackerView: per-camera window, toolbar, draggable handles, YAML save
 kinefly2/apps/       run_offline, run_rig, ctl, list_cameras, calibrate_fly, check_latency, dashboard
+kinefly2/version.py  code version + measurement conventions stamped into every recording
 kinefly2/client.py   Python client for experiment scripts (start/stop/event/status/states)
 kinefly2/core/session.py   recording sessions (attach/detach logger + video at runtime)
 kinefly2/gui/autoplace.py  automatic region placement (registration / silhouette)
@@ -814,6 +875,13 @@ tests/               synthetic-video generator + ground-truth and architecture t
       reads L-R +1.4 deg instead of -17.0, and the head/abdomen hinges no
       longer affect the wings at all. Supersedes an earlier claim that
       `body_axis_deg` alone had decoupled them - it had not.
+- [x] Camera pairing made explicit (2026-09-10): `<cam>/age` on every row,
+      stale cameras logged as NaN instead of repeated, and lockstep for video
+      replay. Free-running replay of the 4449-frame pair had the two views
+      943 frames apart on average (1711 at worst); lockstep holds them at 0.
+- [x] Every recording stamps the code version and the measurement conventions
+      that produced it, so two files with identical configs can still be told
+      apart.
 - [ ] First run against real FLIR cameras: verify ROI and the primary/secondary
       trigger wiring, and confirm 90 Hz on both views at the chosen ROI.
 - [ ] Confirm the lever arm across several flies, and decide whether it can be
