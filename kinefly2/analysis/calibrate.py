@@ -53,11 +53,14 @@ import math
 import numpy as np
 
 
-def load_log(path, cameras=('bottom', 'front')):
+def load_log(path, cameras=None):
     """Read an Hdf5Logger file into a flat dict of arrays.
 
     Returns every '<camera>/<column>' dataset plus 'merged/*', and the event
-    table under 'events/*'. Angles stay in radians, as stored.
+    table under 'events/*'. Angles stay in radians, as stored. `cameras` names
+    the camera groups to read; None (the default) takes every group in the file
+    that is not 'merged' or 'events', so a file from any rig reads without
+    being told what was on it.
 
     'attrs' holds the file attributes -- the code version, the measurement
     conventions, the lever arm and landmark positions in force when it was
@@ -75,6 +78,9 @@ def load_log(path, cameras=('bottom', 'front')):
                 out['attrs'][key] = json.loads(value)
             except (ValueError, TypeError):
                 out['attrs'][key] = value
+        if cameras is None:
+            cameras = [k for k in f.keys() if k not in ('merged', 'events')]
+        out['cameras'] = list(cameras)
         for group in list(cameras) + ['merged']:
             if group not in f:
                 continue

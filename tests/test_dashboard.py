@@ -19,7 +19,8 @@ def strict_loads(text):
     return json.loads(text, parse_constant=boom)
 
 
-def state(view, calibrated=False, seq=0, ages=None, stale_after_s=None):
+def state(view, calibrated=False, seq=0, ages=None, stale_after_s=None,
+          primary=None, t_camera=None, rec=None):
     """A published state shaped like MergedFlyState.to_dict()."""
     nan = float('nan')
     if view == 'ventral':
@@ -35,7 +36,9 @@ def state(view, calibrated=False, seq=0, ages=None, stale_after_s=None):
         'seq': seq, 't_host': float(seq) / 90.0, 'stim': 2.5, 'stim_t_wall': 1.0,
         'ages': ages if ages is not None else {cam: 0.004},
         'stale_after_s': stale_after_s if stale_after_s is not None else 0.055,
-        'cameras': {cam: {'camera': cam, 'seq': seq, 't_camera': nan,
+        'primary': cam if primary is None else primary, 'rec': rec,
+        'cameras': {cam: {'camera': cam, 'seq': seq,
+                          't_camera': nan if t_camera is None else t_camera,
                           't_host': 0.0, 't_done': 0.0,
                           'parts': {
                               'head': {'angles': [math.radians(3.0)], 'gradients': [1.0, 2.0, 0.5],
@@ -148,6 +151,190 @@ def test_new_channels_survive_a_saved_layout():
     print('page defines %d channels including lag, and reconciles saved layouts' % len(ids))
 
 
+def test_time_axis_is_the_frame_clock():
+    """The bug this pins: plotting the host clock silently rescales replay.
+    Tracking a 60 fps file as fast as the machine manages ran 6.6x real time,
+    so a '10 s' window was showing 66 s of video. The primary camera's
+    t_camera is video time on a file and the device clock on a camera."""
+    r = StateBuffer.row_from_state(state('ventral', seq=90, t_camera=12.5))
+    assert r['t'] == 12.5, r['t']
+    assert abs(r['t_host'] - 1.0) < 1e-9, r['t_host']
+
+    # No t_camera (a source that cannot supply one) -> host clock, as before.
+    r = StateBuffer.row_from_state(state('ventral', seq=90))
+    assert abs(r['t'] - 1.0) < 1e-9, r['t']
+
+    # An older publisher names no primary: fall back rather than guess.
+    bare = dict(state('ventral', seq=90, t_camera=12.5))
+    bare.pop('primary')
+    r = StateBuffer.row_from_state(bare)
+    assert abs(r['t'] - 1.0) < 1e-9, 'must not adopt a camera clock unasked'
+
+    # A named primary that is not in the state must not crash either.
+    odd = dict(state('ventral', seq=90, t_camera=12.5), primary='nosuchcam')
+    assert abs(StateBuffer.row_from_state(odd)['t'] - 1.0) < 1e-9
+    print('time axis: frame clock when the primary supplies one, host clock otherwise')
+
+
+def test_saved_file_and_live_stream_agree():
+    """One data model or two implementations -- this is the invariant that
+    keeps it one. A recording read back must produce the same row keys the
+    live stream publishes, or every feature needs writing twice."""
+    import tempfile
+
+    from kinefly2.apps.dashboard import rows_from_h5
+    from kinefly2.core.flystate import BodypartState, CameraState
+    from kinefly2.core.merger import StateMerger
+    from kinefly2.output.logger import Hdf5Logger
+
+    # Named like a real recording: file mode takes the run name from the
+    # filename, so the '_flystate.h5' suffix stripping is part of this.
+    path = os.path.join(tempfile.mkdtemp(), '260910_syn_001_view_flystate.h5')
+    merger = StateMerger(primary='bottom', stale_after_s=0.05)
+    logger = Hdf5Logger(path, cameras=['bottom', 'front'],
+                        metadata={'rig': {'primary': 'bottom',
+                                          'cameras': ['bottom', 'front'],
+                                          'stale_after_s': 0.05}})
+    merger.add_sink(logger)
+    merger.set_recording('260910_syn_001_view')
+
+    def cam(name, seq, t_host):
+        extra = {'roll': 0.01, 'pitch': 0.02, 'yaw': 0.03,
+                 'd_axial': 1.0, 'd_lateral': 2.0, 'roll_sigma': 0.01}
+        return CameraState(camera=name, seq=seq, t_camera=seq / 90.0, t_host=t_host,
+                           t_done=t_host, parts={
+                               'head': BodypartState(angles=[0.05], gradients=[1., 2., .5],
+                                                     radii=[1., 2.], intensity=0.9,
+                                                     kind='landmarks', extra=extra),
+                               'left': BodypartState(angles=[0.8]),
+                               'right': BodypartState(angles=[0.7]),
+                               'abdomen': BodypartState(angles=[0.1]),
+                               'aux': BodypartState(freq=200.0)})
+
+    import time as _t
+    live_rows = []
+    for i in range(20):
+        now = _t.monotonic()
+        merger.stage(cam('front', i, now))
+        live_rows.append(StateBuffer.row_from_state(merger.submit(cam('bottom', i, now)).to_dict()))
+    _t.sleep(0.2)
+    logger.close()
+
+    file_rows, info = rows_from_h5(path)
+    assert len(file_rows) == 20, len(file_rows)
+    assert info['primary'] == 'bottom' and info['primary_known']
+
+    live_keys, file_keys = set(live_rows[5]), set(file_rows[5])
+    assert live_keys == file_keys, (
+        'live-only %s file-only %s' % (sorted(live_keys - file_keys),
+                                       sorted(file_keys - live_keys)))
+
+    # And the same values, not merely the same names.
+    L, F = live_rows[5], file_rows[5]
+    for k in ('bottom/left', 'bottom/head_roll', 'front/head_pitch',
+              'bottom/head_q', 'bottom/wbf', 'bottom/head_d_axial'):
+        assert abs(L[k] - F[k]) < 1e-6, (k, L[k], F[k])
+    assert abs(F['t'] - 5 / 90.0) < 1e-9, F['t']      # frame clock, not host
+    assert F['rec'] == '260910_syn_001_view'
+    print('file and live agree on all %d keys, values match, t = frame clock' % len(live_keys))
+
+
+def test_sweep_and_axis_arithmetic_in_js():
+    """The navigation maths lives in the page, so run it in a real JS engine.
+    Skipped where JavaScriptCore is absent (non-macOS)."""
+    import re
+    import subprocess
+
+    from kinefly2.apps.dashboard import PAGE
+
+    jsc = ('/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/'
+           'Helpers/jsc')
+    if not os.path.exists(jsc):
+        print('jsc not present; skipping the JS sweep test')
+        return
+
+    def extract(name):
+        m = re.search(r'function\s+%s\s*\(' % re.escape(name), PAGE)
+        assert m, 'no function %s in the page' % name
+        i, depth = PAGE.index('{', m.end() - 1), 0
+        for j in range(i, len(PAGE)):
+            if PAGE[j] == '{':
+                depth += 1
+            elif PAGE[j] == '}':
+                depth -= 1
+                if depth == 0:
+                    return PAGE[m.start():j + 1]
+        raise AssertionError('unbalanced braces in %s' % name)
+
+    consts = '\n'.join(m.group(0) for m in
+                       re.finditer(r'^const (TICKS)=.*?;$', PAGE, re.M))
+    assert 'TICKS' in consts
+    src = HARNESS_HEAD + consts + '\n' + \
+        '\n'.join(extract(n) for n in ('bounds', 'rightEdge', 'tickStep', 'mmss')) + \
+        HARNESS_BODY
+    import tempfile
+    js = os.path.join(tempfile.mkdtemp(), 'sweep.js')
+    open(js, 'w').write(src)
+    out = subprocess.run([jsc, js], stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT).stdout.decode()
+    assert 'FAILED' not in out and 'Exception' not in out, out
+    print(out.strip().splitlines()[-1])
+
+
+HARNESS_HEAD = """
+var data=[], recT0=null, mode='live', recName=null;
+var view={win:30, right:0, follow:true};
+"""
+
+HARNESS_BODY = r"""
+function rows(t0,t1,step){ var a=[]; for(var t=t0;t<=t1+1e-9;t+=step) a.push({t:t,t_host:t}); return a; }
+var fails=0;
+function eq(got,want,msg){ if(Math.abs(got-want)>1e-6){ print('FAIL '+msg+': got '+got+' want '+want); fails++; } }
+
+// The sweep: while the data are shorter than the window the right edge stays
+// pinned one window after the start, so the trace fills from the LEFT.
+view.win=30; view.follow=true;
+data=rows(100,105,0.1);
+eq(rightEdge(),130,'right pinned at first+win while filling');
+var W=600, x=function(t){return W*(1-(rightEdge()-t)/view.win);};
+eq(x(100),0,'oldest sample at the left edge');
+eq(x(105),100,'newest sample 1/6 across');
+
+// Changeover to scrolling is seamless.
+data=rows(100,130,0.1); eq(rightEdge(),130,'exactly full: both rules agree');
+data=rows(100,160,0.1); eq(rightEdge(),160,'scrolling follows the newest sample');
+eq(x(160),600,'newest sample at the right edge');
+
+// A recording restarts the sweep partway through the buffer.
+recT0=140; data=rows(100,145,0.1);
+eq(bounds().sweep,140,'recording start becomes the sweep origin');
+eq(rightEdge(),170,'sweep restarts at the recording');
+recT0=null;
+
+// Scrolled back, clamped to the data at both ends.
+data=rows(100,160,0.1); view.follow=false;
+view.right=105; eq(rightEdge(),130,'cannot scroll before the oldest window');
+view.right=999; eq(rightEdge(),160,'cannot scroll past the newest sample');
+view.right=145; eq(rightEdge(),145,'a valid position stays put');
+
+// An empty buffer must not produce NaN.
+data=[]; view.follow=true; eq(rightEdge(),30,'empty buffer: no NaN');
+
+// Ticks keep a readable number of divisions at every window.
+[2,5,10,30,60,120,300].forEach(function(w){ view.win=w; var k=w/tickStep(w);
+  if(!(k>=2&&k<=8)){ print('FAIL ticks for '+w+'s -> '+k); fails++; } });
+
+// mm:ss, including the rounding edge that would otherwise print 1:60.
+view.win=30;
+if(mmss(0)!=='0:00'){print('FAIL mmss(0)='+mmss(0));fails++;}
+if(mmss(75)!=='1:15'){print('FAIL mmss(75)='+mmss(75));fails++;}
+if(mmss(119.6)!=='2:00'){print('FAIL mmss(119.6)='+mmss(119.6)+' (the 1:60 bug)');fails++;}
+view.win=5;
+if(mmss(65.4)!=='1:05.4'){print('FAIL mmss(65.4)='+mmss(65.4));fails++;}
+print(fails ? (fails+' FAILED') : 'sweep, clamping, ticks and mm:ss all pass');
+"""
+
+
 def test_decimation_preserves_extremes():
     """Min/max decimation is what makes a 60 s window at 90 Hz drawable. The
     property that matters is that a spike inside a pixel column survives."""
@@ -167,21 +354,37 @@ def test_decimation_preserves_extremes():
     print('decimation: %d samples -> %d columns, spike %.0f preserved' % (n, W, hi))
 
 
-def test_buffer_trims_to_its_window():
-    buf = StateBuffer.__new__(StateBuffer)      # no ZMQ thread
+def test_buffer_trims_on_the_host_clock():
+    """Trimming must not use the display axis. A looping video resets its
+    frame clock, so a span measured on `t` goes negative and the buffer then
+    never trims again -- it grows until the process dies."""
     import collections
     import threading
-    buf.samples, buf.lock, buf.history_s, buf.n, buf.t_last = \
-        collections.deque(), threading.Lock(), 2.0, 0, None
+
+    def fresh(history_s=2.0):
+        buf = StateBuffer.__new__(StateBuffer)          # no ZMQ thread
+        buf.samples, buf.lock, buf.history_s, buf.n, buf.t_last = \
+            collections.deque(), threading.Lock(), history_s, 0, None
+        return buf
+
+    buf = fresh()
     for i in range(400):
-        row = {'t': i / 90.0}
-        buf.samples.append(row)
-        while buf.samples and row['t'] - buf.samples[0]['t'] > buf.history_s:
-            buf.samples.popleft()
-    span = buf.samples[-1]['t'] - buf.samples[0]['t']
+        buf.samples.append({'t': i / 90.0, 't_host': i / 90.0})
+        buf.trim()
+    span = buf.samples[-1]['t_host'] - buf.samples[0]['t_host']
     assert span <= 2.0 + 1e-9, span
     assert len(buf.samples) > 100
     print('buffer holds %.2f s (%d rows) at a 2 s limit' % (span, len(buf.samples)))
+
+    # The looping-video case: the frame clock restarts, the host clock does not.
+    buf = fresh()
+    for i in range(400):
+        buf.samples.append({'t': (i % 50) / 90.0, 't_host': i / 90.0})
+        buf.trim()
+    assert len(buf.samples) <= 200, 'a reset frame clock must still trim: %d rows' % len(buf.samples)
+    span = buf.samples[-1]['t_host'] - buf.samples[0]['t_host']
+    assert span <= 2.0 + 1e-9, span
+    print('looping video: frame clock resets 8x, buffer still bounded (%d rows)' % len(buf.samples))
 
 
 def test_camera_config_plumbing():
@@ -232,7 +435,10 @@ if __name__ == '__main__':
     test_channels_follow_the_view()
     test_camera_lag_and_stale_badge()
     test_new_channels_survive_a_saved_layout()
+    test_time_axis_is_the_frame_clock()
+    test_saved_file_and_live_stream_agree()
+    test_sweep_and_axis_arithmetic_in_js()
     test_decimation_preserves_extremes()
-    test_buffer_trims_to_its_window()
+    test_buffer_trims_on_the_host_clock()
     test_camera_config_plumbing()
     print('OK')

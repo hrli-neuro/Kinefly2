@@ -73,7 +73,14 @@ class RecordingSession:
                 # landmark positions it was meant for. A lever arm fitted for a
                 # different set of points is silently wrong, so calibrate_fly
                 # compares these before reusing one.
+                # `rig` is what a reader needs to reconstruct the recording's
+                # own time base: which camera drove the merge (so whose
+                # t_camera the rows belong to) and the staleness threshold that
+                # decided which values were blanked.
                 meta = {'lever_px': exp.lever_px or {}, 'landmarks': {},
+                        'rig': {'primary': self.merger.primary,
+                                'cameras': list(self.pipelines),
+                                'stale_after_s': self.merger.stale_after_s},
                         **provenance()}
                 for cam, view in self.views.items():
                     if hasattr(view, 'landmark_geometry'):
@@ -97,6 +104,9 @@ class RecordingSession:
                            'frames_start': {n: p.n_frames for n, p in self.pipelines.items()},
                            'stale_start': self.merger.stale_counts()}
             self.n_sessions += 1
+            # Announce it on the live stream, so a dashboard can say what it is
+            # watching and anchor its time axis to the start of the run.
+            self.merger.set_recording(exp.run_name)
             print('REC start: %s -> %s' % (exp.run_name, exp.output_dir))
             return {'name': exp.run_name, 'output_dir': exp.output_dir}
 
@@ -105,6 +115,7 @@ class RecordingSession:
             if self.active is None:
                 raise RuntimeError('not recording')
             a = self.active
+            self.merger.set_recording(None)
             for name, p in self.pipelines.items():
                 p.recorder = None
             if self.events is not None:

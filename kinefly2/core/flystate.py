@@ -91,6 +91,13 @@ class MergedFlyState:
     # camera's measurements rather than repeating them -- see StateMerger.
     ages: dict = field(default_factory=dict)     # camera name -> seconds
     stale_after_s: float = math.nan              # The threshold in force (NaN = never mask).
+    # Which camera drove this merge. Consumers need it to know whose frame
+    # clock the row belongs to: the dashboard plots against the primary's
+    # t_camera, which is video time on a file and the device clock on a camera.
+    primary: str = None
+    # The run name while a recording is in progress, else None (see
+    # StateMerger.set_recording). Lets a live view show what it is looking at.
+    rec: str = None
 
     def part(self, camera, name):
         cs = self.cameras.get(camera)
@@ -110,4 +117,5 @@ class MergedFlyState:
         return {'seq': self.seq, 't_host': self.t_host,
                 'stim': self.stim, 'stim_t_wall': self.stim_t_wall,
                 'ages': self.ages, 'stale_after_s': self.stale_after_s,
+                'primary': self.primary, 'rec': self.rec,
                 'cameras': {k: v.to_dict() for k, v in self.cameras.items()}}

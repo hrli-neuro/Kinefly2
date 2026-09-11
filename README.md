@@ -342,32 +342,82 @@ positions, so a recording always says what its angles were derived from.
 Typical loop: mount fly → place landmarks → record → `calibrate_fly --write` →
 subsequent blocks report degrees.
 
-### 2.4 Live browser dashboard
+### 2.4 Browser dashboard — live, and for saved recordings
 
 ```bash
 python -m kinefly2.apps.dashboard                       # tracker on this machine
 python -m kinefly2.apps.dashboard --zmq tcp://<rig-ip>:5556 --port 8000
+python -m kinefly2.apps.dashboard --file <run>_flystate.h5      # a saved recording
 ```
 
 Open `http://<machine>:8000` from any computer on the network. It is a separate
 process reading the ZMQ stream, so it adds no load to the tracker, and the page
 has no external dependencies (it works on an offline rig network).
 
+`--file` opens a finished recording in the **same page**: the loader turns HDF5
+columns into exactly the rows the live stream publishes, so scrolling, the
+minimap, the markers and the cursor all behave identically. A saved file also
+gets **event markers** (`k.event(...)`), which the live stream does not carry —
+events go to the logger, not to ZMQ.
+
 It behaves like a chart recorder rather than an auto-ranging plot: **each trace
 holds a fixed y range**, so the picture stays still and a value now is
 comparable with the same value a minute ago. Autoscaling every redraw hides
 small changes by normalising them away.
 
+#### What the time axis means
+
+The x-axis is the **primary camera's frame clock** (`t_camera`): `frame_id /
+fps` for a video file, the device clock for a real camera. So a 10 s window is
+10 s of experiment either way.
+
+This matters when replaying video, because replay is not real time — tracking a
+60 fps pair as fast as the machine manages runs 6–16× faster than the recording.
+Plotting the host clock (which this did originally) made a "10 s" window show
+over a minute of video. Every row still carries `t_host` as well; it is what
+trims the buffer and places events, because a looping video resets the frame
+clock while the host clock never goes backwards.
+
+The axis is labelled `m:ss` from **0:00 at the start of the recording** when one
+is running, and from the oldest sample held otherwise.
+
+#### Moving around in time
+
+The trace **fills from the left** and grows rightwards until it reaches the
+width of the window; after that it scrolls, with `now` at the right edge.
+
 | control | what it does |
 |---|---|
-| `window` | Visible span — 5 / 10 / 30 / 60 s, always ending at now. |
-| `fit` (per trace) | Set this trace's range from what is currently on screen, once. |
+| drag a trace sideways | Pan through time, like pulling the paper through a chart recorder. |
+| mouse wheel over a trace | Zoom the time window continuously, holding the instant under the pointer fixed. |
+| the **overview strip** | The whole buffer at a glance, with the visible window as a box — drag it to jump anywhere. Drop it at the far right to go live again. |
+| `window` | Coarse span: 2 s … 2 min. |
+| `keep` | How much history to hold for scrolling back: `auto` keeps 1 min while idle and 5 min while recording, or pin it at 1/3/5 min. |
+| space / ← → / Home / End | Live toggle · step half a window · jump to the start · back to live. |
+| `Pause` | Stop following; the stream keeps arriving, so nothing is lost. |
+| hover | Cursor line on **every** panel with each trace's value at that instant. |
+
+Scrolling back covers what the page is holding — the `keep` setting, from when
+you opened it. The HDF5 remains the complete record, and `--file` is how you
+look at all of it.
+
+#### Markers
+
+Vertical lines are drawn across **every** panel, so a response can be read
+against the moment that caused it without eyeballing between plots:
+
+- **orange dashed** — a stimulus onset, labelled with the new code. `stim` is
+  held between changes, so a change *is* an onset.
+- **red** — recording start and stop.
+- **blue** — logged events, in `--file` mode only.
+
+| per-trace control | what it does |
+|---|---|
+| `fit` | Set this trace's range from what is currently on screen, once. |
 | `+` `−` `▲` `▼` | Zoom and pan that trace's y axis. |
 | min/max boxes | Type an exact range. |
 | `×` | Hide the trace; it reappears as a button below the plots. |
 | drag the title | Reorder panels. |
-| `Pause` | Freeze the display without losing the stream; `Live` resumes. |
-| hover | Cursor line with every trace's value at that instant. |
 | `Fit all` / `Reset layout` | Autofit everything, or go back to defaults. |
 
 Ranges, order and hidden traces are remembered in the browser, so a reload
@@ -385,6 +435,12 @@ frontal camera shows roll plus pitch and yaw — in **degrees** once that fly's
 `lever_px` is set (section 2.3.2) and in **pixels** before that. Reading the
 raw image-axis displacement instead would mislabel both channels on any camera
 whose axis is not aligned with the frame.
+
+**Opening a file written before this.** Reading a recording back needs to know
+which camera was primary, since that decides whose frame clock the axis is. It
+is stamped in the HDF5 `rig` attribute from 2026-09-10 onward; older files have
+no such attribute, so the primary is **guessed** (the first camera group) and
+both the terminal and the page say so rather than implying the file stated it.
 
 **Stimulus row.** `/merged/stim` is drawn as a step trace. Set it from the
 experiment script whenever the pattern changes:
@@ -772,8 +828,9 @@ Times are seconds (host clock is monotonic; `t_camera` is the device clock;
 `t_wall` is `time.time()`). Events: `/events/t_host`, `/events/t_wall`,
 `/events/text`. Readable with h5py or MATLAB's `h5read`.
 
-**File attributes — what produced the numbers.** Every recording carries
-`code_version` (a `git describe` of the checkout, `-dirty` when it had
+**File attributes — what produced the numbers.** Every recording carries `rig`
+(the primary camera, the camera list and `stale_after_s` — what a reader needs
+to rebuild the recording's own time base), `code_version` (a `git describe` of the checkout, `-dirty` when it had
 uncommitted changes), `kinefly2_version`, `python`, `host`, and `conventions`:
 the measurement conventions in force, currently
 `wing_zero=wing_base_line`, `head_zero=landmark_templates`,
@@ -882,6 +939,12 @@ tests/               synthetic-video generator + ground-truth and architecture t
 - [x] Every recording stamps the code version and the measurement conventions
       that produced it, so two files with identical configs can still be told
       apart.
+- [x] Dashboard on experiment time (2026-09-10): the x-axis is the primary
+      camera's frame clock, so a 10 s window is 10 s of experiment whether
+      replaying or live (it was host time, which made a fast replay's window
+      show 6-16x more than it said). Sweep from the left, drag/wheel/minimap
+      navigation, markers for stimulus onsets and recording start/stop, and
+      `--file` to open a saved recording in the same page.
 - [ ] First run against real FLIR cameras: verify ROI and the primary/secondary
       trigger wiring, and confirm 90 Hz on both views at the chosen ROI.
 - [ ] Confirm the lever arm across several flies, and decide whether it can be

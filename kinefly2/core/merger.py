@@ -47,6 +47,7 @@ class StateMerger:
         self.stim_t_wall = math.nan
         self.n_stale = {}          # camera -> merged rows blanked as stale
         self.last_ages = {}        # camera -> age at the most recent merge
+        self.rec = None            # Run name while recording (see set_recording).
         self.lock = threading.Lock()
 
     def set_stim(self, value):
@@ -68,6 +69,18 @@ class StateMerger:
                 self.stim = value
                 self.stim_t_wall = time.time()
         return {'stim': self.stim, 'changed': changed, 't_wall': self.stim_t_wall}
+
+    def set_recording(self, name):
+        """The run now being recorded, or None when it stops.
+
+        Held on every merged state the same way `stim` is, so anything watching
+        the live stream -- the dashboard, an experiment script -- can tell
+        whether what it is looking at is being kept, and name it, without
+        asking the command socket.
+        """
+        with self.lock:
+            self.rec = str(name) if name else None
+        return self.rec
 
     def add_sink(self, sink):
         with self.lock:
@@ -120,7 +133,8 @@ class StateMerger:
             self.last_ages = ages
             merged = MergedFlyState(seq=self.seq, t_host=t, cameras=cameras,
                                     stim=self.stim, stim_t_wall=self.stim_t_wall,
-                                    ages=ages, stale_after_s=self.stale_after_s)
+                                    ages=ages, stale_after_s=self.stale_after_s,
+                                    primary=self.primary, rec=self.rec)
             sinks = self.sinks
         for sink in sinks:
             sink.handle(merged)
