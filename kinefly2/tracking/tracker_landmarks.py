@@ -568,11 +568,17 @@ class LandmarkTracker(object):
 
     # ------------------------------------------------------------- drawing
 
-    def status_text(self):
+    def status_text(self, verbose=True):
         """The whole readout for this part, named for the camera view: the
         exact in-plane angle in degrees with its precision, then the two
-        lever-arm channels (px, or degrees once calibrated), then match
-        quality and any warnings. gui/app.py prefixes only the part label."""
+        lever-arm channels (px, or degrees once calibrated). gui/app.py
+        prefixes only the part label.
+
+        `verbose` adds the match quality and the standing configuration notes
+        (the auto-clamped search radius, say). Those are useful while tuning
+        and noise the rest of the time, so the overlay leaves them off by
+        default -- but NON-RIGID and a bad landmark are alarms, not
+        decoration, and are shown either way."""
         if not len(self.ok):
             return ''
         x = getattr(self.state, 'extra', None) or {}
@@ -592,15 +598,18 @@ class LandmarkTracker(object):
             else:
                 s += '  %s %+5.1f %s %+5.1f px' % (ch['axial'], d_ax,
                                                    ch['lateral'], d_lat)
-        s += '  %d/%d  q%.2f' % (int(self.ok.sum()), len(self.ok), self.state.intensity)
+        s += '  %d/%d' % (int(self.ok.sum()), len(self.ok))
+        if verbose:
+            s += '  q%.2f' % self.state.intensity
         g = self.state.gradients
         if len(g) > 2 and np.isfinite(g[2]) and g[2] > self.nonrigid_px:
             s += '  NON-RIGID %.1fpx' % g[2]
         k = x.get('worst_lm')
         if k is not None:
             s += '  lm%d BAD' % k
-        for w in self.warnings:
-            s += '  ' + w
+        if verbose:
+            for w in self.warnings:
+                s += '  ' + w
         return s
 
     def draw(self, image):

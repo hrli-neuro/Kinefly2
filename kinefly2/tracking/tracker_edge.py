@@ -308,15 +308,17 @@ class EdgeTrackerByIntensityProfile(MotionTrackedBodypartPolar):
     # draw()
     # Draw the outline.
     #
-    def status_text(self):
-        """The whole overlay readout for this part: its angle, and a warning when
-        the annulus is finding more edges than it was asked for.
+    def status_text(self, verbose=True):
+        """The overlay readout for this part: its angle, and a warning when the
+        annulus is finding more edges than it was asked for.
 
         A part that defines status_text renders its own readout, so the angle
         has to be here -- returning only the warning blanked the angle for every
-        edge part (the wings included)."""
+        edge part (the wings included). With `verbose` off the angle is dropped
+        and only the warning remains, so a part that is behaving takes no space
+        on the overlay while one that is not still says so."""
         s = ''
-        if len(self.state.angles) > 0 and np.isfinite(self.state.angles[0]):
+        if verbose and len(self.state.angles) > 0 and np.isfinite(self.state.angles[0]):
             s += '% 6.1f deg' % np.degrees(self.state.angles[0])
         n = int((self.state.extra or {}).get('n_edges', 0))
         want = self.params[self.name].get('n_edges_max')

@@ -822,16 +822,26 @@ track median in the low milliseconds.
   Hinge moves do not disturb the wing angles: each wing is referenced to the
   other wing's hinge (section 2.5.5), and the body frame is frozen in
   `body_axis_deg`.
+- **Overlay text:** three lines by default — frame rate and tracking time,
+  `L-R` wing stroke amplitude, and head motion. Anything *wrong* is always
+  shown on top of that: a `NON-RIGID` fit, a bad landmark, or an annulus
+  finding the wrong number of edges (`leg_r3: 3 edges (want 1) - narrow the
+  sector`). The **`angles`** toolbar toggle adds a per-part angle readout,
+  `L+R`, the landmark match quality and the standing configuration notes —
+  useful while tuning, clutter the rest of the time. It is remembered in the
+  config as `gui.angles`.
 - **Toolbar:** `exit`; `saveBG` (capture the current image as the background
   for subtraction — do it with the fly absent or not illuminated);
   `autoplace` (place all regions automatically from the current image, see
   below); `reset` (undo autoplace / restore the startup layout); `zero` (this
   posture = zero for all trackers: landmark templates recaptured);
   `+H`/`-H` (add/remove a landmark on the head — one pair per landmark part);
-  `track: H A L R X` (toggle head/abdomen/left/right/aux);
+  `track: H A L R … X` (toggle each part; extra parts get a two-character
+  label from their name, `leg_l3` -> `l3`);
   `subtract: H A LR X` (background subtraction per part); `invertcolor`
   (set if the fly is dark on a bright background); `stabilize`; `symmetric`
-  (mirror left/right edits); `windows` (extra debug windows).
+  (mirror left/right edits); `angles` (per-part angle readout, see above);
+  `windows` (extra debug windows).
 - **Every mouse-up saves the GUI-owned parameters (regions, flags) back into
   that camera's YAML**, merged into the file as it is on disk — hand edits
   made while Kinefly2 runs (tracker types, thresholds) are kept, with a

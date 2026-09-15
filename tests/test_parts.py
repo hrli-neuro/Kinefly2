@@ -253,6 +253,33 @@ def test_an_extra_part_can_be_dragged():
     print('drag: leg hinge grabbable and movable, sector adjustable, mirrors when symmetric')
 
 
+def test_quiet_overlay_keeps_the_warnings():
+    """The overlay defaults to three lines -- frame rate, L-R, head motion --
+    because a readout per part was unreadable. What must NOT disappear with the
+    clutter is anything that says a measurement is wrong."""
+    from kinefly2.tracking.tracker_edge import EdgeTrackerByIntensityProfile
+
+    p = base_params(('leg_r3',))
+    p['leg_r3']['tracker'] = 'edge'
+    t = EdgeTrackerByIntensityProfile(name='leg_r3', params=p, color='blue')
+    t.params = p
+    t.state.angles = [math.radians(60.5)]
+
+    # Behaving: silent when quiet, angle when asked.
+    t.state.extra = {'n_edges': 1.0}
+    assert t.status_text(verbose=False).strip() == '', repr(t.status_text(False))
+    assert '60.5' in t.status_text(verbose=True)
+
+    # Misbehaving: speaks up either way.
+    t.state.extra = {'n_edges': 3.0}
+    quiet = t.status_text(verbose=False)
+    assert 'narrow the sector' in quiet, repr(quiet)
+    assert '3 edges (want 1)' in quiet
+    assert '60.5' not in quiet, 'a quiet line should carry the warning, not the angle'
+    assert 'narrow the sector' in t.status_text(verbose=True)
+    print('quiet overlay: silent while correct, still warns when the sector is wrong')
+
+
 def test_extra_parts_reach_the_log_and_the_dashboard():
     import tempfile
 
@@ -308,5 +335,6 @@ if __name__ == '__main__':
     test_part_labels_fit_the_toolbar()
     test_colours_are_per_part_not_per_tracker()
     test_an_extra_part_can_be_dragged()
+    test_quiet_overlay_keeps_the_warnings()
     test_extra_parts_reach_the_log_and_the_dashboard()
     print('OK')

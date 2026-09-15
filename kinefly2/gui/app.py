@@ -78,6 +78,11 @@ def tracker_defaults():
             'aux': {'tracker': 'intensity',
                     'saturation_correction': True},
             'gui': {'windows': False,
+                    # Per-part angle readouts. Off: the overlay carries the
+                    # frame rate, L-R, head motion, and anything that is
+                    # actually wrong. On: every part prints its angle, which is
+                    # what you want while tuning and clutter the rest of the time.
+                    'angles': False,
                     'symmetric': True,
                     'axis': {'track': False,
                              'pt1': {'x': 175, 'y': 50},
@@ -526,6 +531,7 @@ class TrackerView:
             h_text = int(h * self.scale)
 
             if not self.bMousing:
+                verbose = bool(self.params['gui'].get('angles'))
                 s = '%5.1fHz  track:%4.1fms' % (self.hzF, self.dtTrack * 1e3)
                 cv2.putText(imgOutput, s, (x, y), self.fontface, self.scaleText,
                             ui.bgra_dict['dark_red'])
@@ -549,11 +555,12 @@ class TrackerView:
                         L = np.degrees(self.fly.left.state.angles[0])
                         R = np.degrees(self.fly.right.state.angles[0])
                         y -= h_text + self.h_gap
-                        cv2.putText(imgOutput, 'L+R:% 6.1f deg' % (L + R), (x, y),
-                                    self.fontface, self.scaleText, ui.bgra_dict['blue'])
-                        y -= h_text + self.h_gap
                         cv2.putText(imgOutput, 'L-R:% 6.1f deg' % (L - R), (x, y),
                                     self.fontface, self.scaleText, ui.bgra_dict['blue'])
+                        if verbose:
+                            y -= h_text + self.h_gap
+                            cv2.putText(imgOutput, 'L+R:% 6.1f deg' % (L + R), (x, y),
+                                        self.fontface, self.scaleText, ui.bgra_dict['blue'])
 
                 # Bottom-up, so head ends up on top; extra parts sit below the
                 # standard four rather than pushing them around.
@@ -561,14 +568,20 @@ class TrackerView:
                     label = part_label(partname, long=True)
                     if self.params['gui'][partname]['track']:
                         part = getattr(self.fly, partname)
-                        s = label + ':'
                         if hasattr(part, 'status_text'):
-                            # The landmark tracker names its own channels (they
-                            # differ between the ventral and frontal views) and
-                            # renders the whole readout itself.
-                            s += part.status_text()
-                        elif len(part.state.angles) > 0:
-                            s += '% 6.1f deg' % np.degrees(part.state.angles[0])
+                            # The tracker renders its own readout: the landmark
+                            # one names channels that differ between views, and
+                            # an edge one says nothing unless its annulus is
+                            # finding the wrong number of edges.
+                            body = part.status_text(verbose)
+                        elif verbose and len(part.state.angles) > 0:
+                            body = '% 6.1f deg' % np.degrees(part.state.angles[0])
+                        else:
+                            body = ''
+                        # A part with nothing to report takes no space at all.
+                        if not body.strip():
+                            continue
+                        s = label + ':' + body
                         # The landmark readout carries warnings worth reading, so
                         # wrap it onto extra lines rather than let it run off the
                         # right edge of the frame.
@@ -673,6 +686,8 @@ class TrackerView:
             state=self.params['gui']['head']['stabilize'])
         add(type='checkbox', name='symmetry', text='symmetric',
             state=self.params['gui']['symmetric'])
+        add(type='checkbox', name='angles', text='angles',
+            state=self.params['gui'].get('angles', False))
         add(type='checkbox', name='windows', text='windows',
             state=self.params['gui']['windows'])
         self.yToolbar = self.buttons[-1].bottom + 1
@@ -1097,6 +1112,8 @@ class TrackerView:
                 elif name == 'stabilize':
                     for partname in self.partnames:
                         self.params['gui'][partname]['stabilize'] = state
+                elif name == 'angles':
+                    self.params['gui']['angles'] = state
                 elif name == 'windows':
                     self.params['gui']['windows'] = state
 
