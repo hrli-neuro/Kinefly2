@@ -759,13 +759,14 @@ edges silently changed both wings (left 68.4° → 65.4°).
 
 #### Overlay colours
 
-Colour is **per part**, not per tracker kind — the abdomen and both legs all run
-`edge`, so colouring by algorithm drew three overlapping annuli in one red:
+Colour is **per part**, not per tracker kind. The abdomen and both legs all run
+`edge`, so colouring by algorithm drew three overlapping annuli in one red —
+and the legs are the ones that sit on top of the abdomen:
 
 | part | colour |
 |---|---|
-| head, abdomen | red |
-| left, right wing | green |
+| head | green |
+| abdomen, left/right wing | red |
 | `leg_*` | blue |
 | aux | yellow |
 

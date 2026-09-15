@@ -38,10 +38,10 @@ TRACKER_KINDS = {
 # colouring by tracker kind drew three overlapping annuli in one red.
 # Override any of these with `color:` in the part's config section.
 PART_COLORS = {
-    'head': 'red',
+    'head': 'green',
     'abdomen': 'red',
-    'left': 'green',
-    'right': 'green',
+    'left': 'red',
+    'right': 'red',
     'aux': 'yellow',
 }
 LEG_COLOR = 'blue'          # anything named leg_*

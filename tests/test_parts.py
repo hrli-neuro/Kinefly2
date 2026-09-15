@@ -185,16 +185,19 @@ def test_colours_are_per_part_not_per_tracker():
     drew three overlapping annuli in one red and there was no way to tell which
     was which."""
     assert parts.part_color('leg_l3') == 'blue' and parts.part_color('leg_r3') == 'blue'
-    assert parts.part_color('head') == 'red' and parts.part_color('abdomen') == 'red'
-    assert parts.part_color('left') == parts.part_color('right')
-    assert parts.part_color('left') != parts.part_color('abdomen'), 'wings must not match the abdomen'
+    assert parts.part_color('head') == 'green'
+    assert parts.part_color('abdomen') == 'red'
+    assert parts.part_color('left') == parts.part_color('right') == 'red'
+    # The point of the scheme: the legs, which overlap the abdomen's annulus,
+    # must not be drawn in the abdomen's colour.
     assert parts.part_color('leg_l3') != parts.part_color('abdomen')
+    assert parts.part_color('head') != parts.part_color('abdomen')
     # A part's own `color:` wins, so any of this is overridable from the config.
     assert parts.part_color('leg_r3', {'leg_r3': {'color': 'cyan'}}) == 'cyan'
     # An unknown part still gets something drawable rather than crashing.
     assert parts.part_color('thorax', {'thorax': {'tracker': 'edge'}}) == 'red'
     assert parts.part_color('mystery') == 'white'
-    print('colours: legs blue, head/abdomen red, wings green, all overridable')
+    print('colours: legs blue, abdomen/wings red, head green, all overridable')
 
 
 def test_an_extra_part_can_be_dragged():
