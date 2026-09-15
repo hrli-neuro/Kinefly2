@@ -7,3 +7,4 @@ tests/videos/*.yaml
 background_*.png
 reference_*.png
 *.yaml.bak
+.DS_Store

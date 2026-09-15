@@ -138,6 +138,48 @@ def test_angle_from_mean_reports_the_midpoint():
     print('angle_from mean: circular, so 170 and -170 give 180 (not 0)')
 
 
+def test_edge_readout_still_shows_the_angle():
+    """The bug this pins: the GUI renders a part's own status_text INSTEAD of
+    the angle when the part defines one. Adding status_text to the edge tracker
+    for the edge-count warning therefore blanked the angle for every edge part
+    -- both wings included -- leaving the overlay reading 'L:' with no number."""
+    from kinefly2.tracking.tracker_edge import EdgeTrackerByIntensityProfile
+
+    p = base_params(('leg_r3',))
+    p['left']['tracker'] = 'edge'
+    t = EdgeTrackerByIntensityProfile(name='left', params=p, color='red')
+    t.params = p
+    t.state.angles = [math.radians(65.9)]
+    t.state.extra = {'n_edges': 1.0}
+    s = t.status_text()
+    assert '65.9' in s, 'the angle must still be shown: %r' % s
+    assert 'edges' not in s, 'no warning when the count is what was asked for: %r' % s
+
+    # Wrong count: the angle stays, and the warning says what to do about it.
+    t.state.extra = {'n_edges': 3.0}
+    s = t.status_text()
+    assert '65.9' in s and '3 edges (want 1)' in s, s
+    assert 'narrow the sector' in s
+
+    # No angle yet: no crash, no bogus number.
+    t.state.angles = []
+    assert 'deg' not in t.status_text()
+    print('edge readout: angle always shown; warning appended only when the count is wrong')
+
+
+def test_part_labels_fit_the_toolbar():
+    from kinefly2.gui.app import part_label
+
+    assert part_label('head') == 'H' and part_label('head', long=True) == 'HEAD'
+    assert part_label('left') == 'L' and part_label('right') == 'R'
+    # An extra part gets a two-character label; 'leg_l3' must not print as
+    # 'leg_l3' in a toolbar that has room for two.
+    assert part_label('leg_l3') == 'l3' and part_label('leg_r3') == 'r3'
+    assert len(part_label('leg_l3')) <= 2
+    assert part_label('leg_l3', long=True) == 'LEG_L3'
+    print('toolbar labels: leg_l3 -> l3, readout LEG_L3')
+
+
 def test_extra_parts_reach_the_log_and_the_dashboard():
     import tempfile
 
@@ -189,5 +231,7 @@ if __name__ == '__main__':
     test_each_part_is_referenced_to_its_opposite()
     test_per_part_tuning_does_not_leak()
     test_angle_from_mean_reports_the_midpoint()
+    test_edge_readout_still_shows_the_angle()
+    test_part_labels_fit_the_toolbar()
     test_extra_parts_reach_the_log_and_the_dashboard()
     print('OK')

@@ -93,12 +93,12 @@ tracker:
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 149.0
+        x: 142.0
         y: 212.0
-      radius_outer: 52.0
-      radius_inner: 28.0
+      radius_outer: 41.036569057366385
+      radius_inner: 12.0
       angle_hi: 3.9269908169872414
-      angle_lo: 2.356194490192345
+      angle_lo: 2.323053784242993
     left:
       track: true
       subtract_bg: true
@@ -131,7 +131,7 @@ tracker:
       radius2: 20.0
       angle: 0.0009577905185621404
     leg_l3:
-      track: false
+      track: true
       subtract_bg: true
       stabilize: false
       hinge:
@@ -142,7 +142,7 @@ tracker:
       angle_lo: 2.792526803190927
       angle_hi: 3.7524578917878086
     leg_r3:
-      track: false
+      track: true
       subtract_bg: true
       stabilize: false
       hinge:

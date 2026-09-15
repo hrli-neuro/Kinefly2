@@ -309,14 +309,23 @@ class EdgeTrackerByIntensityProfile(MotionTrackedBodypartPolar):
     # Draw the outline.
     #
     def status_text(self):
-        """Shown on the overlay: how many edges this sector is finding. Anything
-        but the expected count means the annulus is catching something else."""
+        """The whole overlay readout for this part: its angle, and a warning when
+        the annulus is finding more edges than it was asked for.
+
+        A part that defines status_text renders its own readout, so the angle
+        has to be here -- returning only the warning blanked the angle for every
+        edge part (the wings included)."""
+        s = ''
+        if len(self.state.angles) > 0 and np.isfinite(self.state.angles[0]):
+            s += '% 6.1f deg' % np.degrees(self.state.angles[0])
         n = int((self.state.extra or {}).get('n_edges', 0))
         want = self.params[self.name].get('n_edges_max')
         want = int(self.params.get('n_edges_max', 1) if want is None else want)
-        if n == want:
-            return ''
-        return '%s: %d edges (want %d) - narrow the sector' % (self.name, n, want)
+        if n != want:
+            # The sector is catching something else, and the angle above is then
+            # a plausible-looking wrong answer.
+            s += '  %d edges (want %d) - narrow the sector' % (n, want)
+        return s
 
     def draw(self, image):
         MotionTrackedBodypartPolar.draw(self, image)

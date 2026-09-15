@@ -28,6 +28,21 @@ from ..tracking import parts as partspec
 from ..tracking.MsgFlyState import Header
 
 
+def part_label(name, long=False):
+    """Short label for a part in the toolbar, or its readout name.
+
+    The standard four keep the single letters Kinefly used. An extra part is
+    labelled by its distinguishing tail -- leg_l3 -> 'l3' -- because the
+    toolbar has room for two characters, not seven."""
+    fixed = {'head': ('H', 'HEAD'), 'abdomen': ('A', 'ABDOMEN'),
+             'left': ('L', 'L'), 'right': ('R', 'R'), 'aux': ('X', 'AUX')}
+    if name in fixed:
+        return fixed[name][1 if long else 0]
+    if long:
+        return name.upper()
+    return name.rsplit('_', 1)[-1][:2]
+
+
 def tracker_defaults():
     return {'invertcolor': 'auto',   # 'auto', true (dark fly on bright bg), or false.
             'scale_image': 1.0,      # Reducing the image scale will speed the framerate.
@@ -540,8 +555,10 @@ class TrackerView:
                         cv2.putText(imgOutput, 'L-R:% 6.1f deg' % (L - R), (x, y),
                                     self.fontface, self.scaleText, ui.bgra_dict['blue'])
 
-                for partname, label in (('right', 'R'), ('left', 'L'),
-                                        ('abdomen', 'ABDOMEN'), ('head', 'HEAD')):
+                # Bottom-up, so head ends up on top; extra parts sit below the
+                # standard four rather than pushing them around.
+                for partname in reversed(self.partnames):
+                    label = part_label(partname, long=True)
                     if self.params['gui'][partname]['track']:
                         part = getattr(self.fly, partname)
                         s = label + ':'
@@ -628,9 +645,8 @@ class TrackerView:
             add(type='pushbutton', name='dellm_' + partname, text='-' + initial)
         add(type='static', name='track', text='track:',
             sides=ui.SIDE_LEFT | ui.SIDE_TOP | ui.SIDE_BOTTOM)
-        for partname, label in (('head', 'H'), ('abdomen', 'A'), ('left', 'L'),
-                                ('right', 'R')):
-            add(type='checkbox', name=partname, text=label,
+        for partname in self.partnames:
+            add(type='checkbox', name=partname, text=part_label(partname),
                 state=self.params['gui'][partname]['track'],
                 sides=ui.SIDE_TOP | ui.SIDE_BOTTOM)
         add(type='checkbox', name='aux', text='X',
