@@ -767,12 +767,14 @@ class TrackerView:
             (tagHit, delim, partnameHit) = nameNearest.partition('_')
             uiHit = self.buttons[iButtonHit].type
         else:
-            hits = [self.fly.left.hit_object(ptMouse),
-                    self.fly.right.hit_object(ptMouse),
-                    self.fly.head.hit_object(ptMouse),
-                    self.fly.abdomen.hit_object(ptMouse),
-                    self.fly.aux.hit_object(ptMouse),
-                    self.fly.axis.hit_object(ptMouse)]
+            # Extra parts are tested FIRST: a leg annulus sits on top of the
+            # abdomen's, and whichever is tested first wins the grab. The
+            # standard four keep their original order behind them.
+            order = list(partspec.extra_parts(self.params)) + \
+                ['left', 'right', 'head', 'abdomen', 'aux']
+            hits = [self.fly.parts[n].hit_object(ptMouse)
+                    for n in order if n in self.fly.parts]
+            hits.append(self.fly.axis.hit_object(ptMouse))
             for (partname, tag) in hits:
                 if tag is not None:
                     tagHit = tag
@@ -787,13 +789,27 @@ class TrackerView:
         return tag
 
     def bodypart_from_partname(self, partname):
-        return {'left': self.fly.left, 'right': self.fly.right,
-                'head': self.fly.head, 'abdomen': self.fly.abdomen,
-                'aux': self.fly.aux, 'axis': self.fly.axis}.get(partname)
+        if partname == 'axis':
+            return self.fly.axis
+        return self.fly.parts.get(partname)
+
+    def is_mirrored(self, partname):
+        """Parts that edit in mirror-image pairs when `symmetric` is on: the two
+        wings, and each leg with the leg on the other side. Head and abdomen
+        pair too but move the whole body frame, so they are handled apart."""
+        if partname in (None, 'head', 'abdomen', 'aux', 'axis'):
+            return False
+        other = partspec.opposite(partname)
+        return bool(other and other in self.fly.parts)
 
     def update_params_from_mouse(self, tagSelected, partnameSelected, ptMouse):
-        partnameSlave = {'axis': None, 'head': 'abdomen', 'abdomen': 'head',
-                         'right': 'left', 'left': 'right', 'aux': None}[partnameSelected]
+        # opposite() reproduces the old fixed pairing and extends it to any part
+        # a camera declares -- a leg pairs with the leg on the other side.
+        partnameSlave = None
+        if partnameSelected not in ('axis', 'aux'):
+            other = partspec.opposite(partnameSelected)
+            if other and other in self.params['gui']:
+                partnameSlave = other
         tagOther = 'angle_lo' if (tagSelected == 'angle_hi') else 'angle_hi'
         tagSlave = tagOther
         bodypartSelected = self.bodypart_from_partname(partnameSelected)
@@ -844,8 +860,7 @@ class TrackerView:
                 paramsScaled['gui'][partnameSelected]['hinge']['x'] = float(ptMouse[0])
                 paramsScaled['gui'][partnameSelected]['hinge']['y'] = float(ptMouse[1])
 
-                for part in (self.fly.axis, self.fly.head, self.fly.abdomen,
-                             self.fly.left, self.fly.right):
+                for part in [self.fly.axis] + list(self.fly.parts.values()):
                     part.bValidMask = False
 
                 if paramsScaled['gui']['symmetric']:
@@ -865,11 +880,14 @@ class TrackerView:
                     paramsScaled['gui']['right']['hinge']['x'] = float(ptRight[0])
                     paramsScaled['gui']['right']['hinge']['y'] = float(ptRight[1])
 
-            elif partnameSelected in ('left', 'right'):
+            elif partnameSelected in self.partnames:
+                # Wings and every extra part (the legs): the hinge moves where
+                # it is dragged. Before this each leg fell through both branches
+                # and its hinge simply would not move.
                 paramsScaled['gui'][partnameSelected]['hinge']['x'] = float(ptMouse[0])
                 paramsScaled['gui'][partnameSelected]['hinge']['y'] = float(ptMouse[1])
                 bodypartSelected.bValidMask = False
-                if paramsScaled['gui']['symmetric']:
+                if paramsScaled['gui']['symmetric'] and self.is_mirrored(partnameSelected):
                     ptSlave = imageprocessing.get_reflection_across_axis(
                         ptMouse, (self.fly.abdomen.ptHinge_i, self.fly.head.ptHinge_i))
                     paramsScaled['gui'][partnameSlave]['hinge']['x'] = float(ptSlave[0])
@@ -916,7 +934,7 @@ class TrackerView:
 
             bodypartSelected.bValidMask = False
 
-            if partnameSelected in ('left', 'right') and paramsScaled['gui']['symmetric']:
+            if self.is_mirrored(partnameSelected) and paramsScaled['gui']['symmetric']:
                 paramsScaled['gui'][partnameSlave][tagSlave] = -paramsScaled['gui'][partnameSelected][tagSelected]
                 paramsScaled['gui'][partnameSlave][tagSelected] = -paramsScaled['gui'][partnameSelected][tagSlave]
                 paramsScaled['gui'][partnameSlave]['radius_outer'] = paramsScaled['gui'][partnameSelected]['radius_outer']
@@ -928,7 +946,7 @@ class TrackerView:
                 min(np.linalg.norm(bodypartSelected.ptHinge_i - ptMouse),
                     bodypartSelected.params['gui'][partnameSelected]['radius_outer'] - 2 * self.scale))
             bodypartSelected.bValidMask = False
-            if partnameSelected in ('left', 'right') and paramsScaled['gui']['symmetric']:
+            if self.is_mirrored(partnameSelected) and paramsScaled['gui']['symmetric']:
                 paramsScaled['gui'][partnameSlave]['radius_outer'] = paramsScaled['gui'][partnameSelected]['radius_outer']
                 paramsScaled['gui'][partnameSlave]['radius_inner'] = paramsScaled['gui'][partnameSelected]['radius_inner']
                 bodypartSlave.bValidMask = False

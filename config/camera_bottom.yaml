@@ -73,8 +73,8 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 199.0
-        y: 215.0
+        x: 195.0
+        y: 214.0
       radius_outer: 32.770241272597865
       radius_inner: 14.87578304130834
       angle_hi: 1.0330055122315223
@@ -104,8 +104,8 @@ tracker:
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 160.0
-        y: 186.0
+        x: 165.0
+        y: 187.0
       radius_outer: 121.79490958164057
       radius_inner: 80.11242100947892
       angle_hi: -0.040589357761594336

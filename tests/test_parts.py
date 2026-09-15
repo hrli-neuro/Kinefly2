@@ -180,6 +180,76 @@ def test_part_labels_fit_the_toolbar():
     print('toolbar labels: leg_l3 -> l3, readout LEG_L3')
 
 
+def test_colours_are_per_part_not_per_tracker():
+    """The abdomen and both legs all run `edge`, so colouring by tracker kind
+    drew three overlapping annuli in one red and there was no way to tell which
+    was which."""
+    assert parts.part_color('leg_l3') == 'blue' and parts.part_color('leg_r3') == 'blue'
+    assert parts.part_color('head') == 'red' and parts.part_color('abdomen') == 'red'
+    assert parts.part_color('left') == parts.part_color('right')
+    assert parts.part_color('left') != parts.part_color('abdomen'), 'wings must not match the abdomen'
+    assert parts.part_color('leg_l3') != parts.part_color('abdomen')
+    # A part's own `color:` wins, so any of this is overridable from the config.
+    assert parts.part_color('leg_r3', {'leg_r3': {'color': 'cyan'}}) == 'cyan'
+    # An unknown part still gets something drawable rather than crashing.
+    assert parts.part_color('thorax', {'thorax': {'tracker': 'edge'}}) == 'red'
+    assert parts.part_color('mystery') == 'white'
+    print('colours: legs blue, head/abdomen red, wings green, all overridable')
+
+
+def test_an_extra_part_can_be_dragged():
+    """The bug this pins: the hinge branch tested `in ('left','right')` and the
+    head/abdomen case above it, so a leg matched neither and its hinge simply
+    would not move -- the annulus was drawn but untunable."""
+    import shutil
+    import tempfile
+
+    import cv2
+
+    from kinefly2.camera.base import Frame
+    from kinefly2.gui.app import TrackerView
+
+    cfg_src = os.path.join(os.path.dirname(HERE), 'config')
+    if not os.path.exists(os.path.join(cfg_src, 'camera_bottom.yaml')):
+        print('no shipped bottom config; skipping the drag test')
+        return
+    d = tempfile.mkdtemp()
+    for f in os.listdir(cfg_src):
+        shutil.copy2(os.path.join(cfg_src, f), d)
+    view = TrackerView('bottom', os.path.join(d, 'camera_bottom.yaml'), use_gui=False)
+    if 'leg_r3' not in view.fly.parts:
+        print('bottom config declares no extra parts; skipping')
+        return
+    img = np.zeros((336, 384), np.uint8)
+    view.process(Frame(image=img, t_camera=0.0, t_host=0.0, frame_id=0))
+
+    h = dict(view.params['gui']['leg_r3']['hinge'])
+    ui_, tag, part, _ = view.hit_object(np.array([h['x'], h['y']]))
+    assert (part, tag) == ('leg_r3', 'hinge'), 'leg hinge not grabbable: %r %r' % (part, tag)
+
+    view.params['gui']['symmetric'] = False
+    view.update_params_from_mouse('hinge', 'leg_r3', np.array([h['x'] - 12.0, h['y'] + 8.0]))
+    moved = view.params['gui']['leg_r3']['hinge']
+    assert abs(moved['x'] - (h['x'] - 12.0)) < 1e-6, moved
+    assert abs(moved['y'] - (h['y'] + 8.0)) < 1e-6, moved
+
+    # The scan area too: the angle handle sets the sector and the outer radius.
+    before = (view.params['gui']['leg_r3']['angle_hi'],
+              view.params['gui']['leg_r3']['radius_outer'])
+    view.update_params_from_mouse('angle_hi', 'leg_r3', np.array([120.0, 285.0]))
+    after = (view.params['gui']['leg_r3']['angle_hi'],
+             view.params['gui']['leg_r3']['radius_outer'])
+    assert after != before, 'dragging the angle handle changed nothing'
+
+    # With `symmetric`, a leg mirrors onto the leg on the other side.
+    view.params['gui']['symmetric'] = True
+    lbefore = dict(view.params['gui']['leg_l3']['hinge'])
+    view.update_params_from_mouse('hinge', 'leg_r3', np.array([170.0, 245.0]))
+    lafter = view.params['gui']['leg_l3']['hinge']
+    assert (lbefore['x'], lbefore['y']) != (lafter['x'], lafter['y']), 'mirror did not apply'
+    print('drag: leg hinge grabbable and movable, sector adjustable, mirrors when symmetric')
+
+
 def test_extra_parts_reach_the_log_and_the_dashboard():
     import tempfile
 
@@ -233,5 +303,7 @@ if __name__ == '__main__':
     test_angle_from_mean_reports_the_midpoint()
     test_edge_readout_still_shows_the_angle()
     test_part_labels_fit_the_toolbar()
+    test_colours_are_per_part_not_per_tracker()
+    test_an_extra_part_can_be_dragged()
     test_extra_parts_reach_the_log_and_the_dashboard()
     print('OK')

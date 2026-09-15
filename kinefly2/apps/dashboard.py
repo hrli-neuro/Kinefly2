@@ -116,8 +116,15 @@ class StateBuffer:
             # does not.
             names = list(PARTS) + [p for p in parts if p not in PARTS and p != 'aux']
             for part in names:
-                a = ((parts.get(part) or {}).get('angles') or [None])[0]
+                ps = parts.get(part) or {}
+                a = (ps.get('angles') or [None])[0]
                 row['%s/%s' % (cam, part)] = None if a is None else math.degrees(a)
+                # Edge trackers report how many edges their annulus found. It is
+                # the check that says whether an angle is trustworthy at all.
+                # Emitted for every part, null where the tracker has no such
+                # notion, so a live row and a row read back from a file carry
+                # exactly the same keys.
+                row['%s/%s_n_edges' % (cam, part)] = (ps.get('extra') or {}).get('n_edges')
             head = parts.get('head') or {}
             extra = head.get('extra') or {}
             # The anatomical channels, named by the tracker itself. Exactly one
@@ -254,6 +261,7 @@ def rows_from_h5(path):
                         if k.startswith(cam + '/') and k.endswith('_angle')} - set(PARTS))
         for part in list(PARTS) + extra:
             put('%s/%s' % (cam, part), '%s/%s_angle' % (cam, part), 'deg')
+            put('%s/%s_n_edges' % (cam, part), '%s/%s_n_edges' % (cam, part))
         for name in ('roll', 'pitch', 'yaw'):
             put('%s/head_%s' % (cam, name), '%s/head_%s' % (cam, name), 'deg')
         for name in ('d_axial', 'd_lateral'):
@@ -393,6 +401,10 @@ const CHANNELS=[
  {id:'wsa',   title:'Wing stroke amplitude (bottom)', unit:'deg',
   keys:[{k:'bottom/left',c:'#e55',lbl:'L'},{k:'bottom/right',c:'#5be',lbl:'R'}], def:[0,180]},
  {id:'lmr',   title:'L − R  (bottom)', unit:'deg', keys:[{k:'L-R',c:'#fd5',lbl:'L−R'}], def:[-60,60]},
+ {id:'abd',   title:'Abdomen bending (bottom)', unit:'deg',
+  keys:[{k:'bottom/abdomen',c:'#f88',lbl:'abd'}], def:[-45,45]},
+ {id:'legs',  title:'Hind legs (bottom)', unit:'deg',
+  keys:[{k:'bottom/leg_l3',c:'#6af',lbl:'L3'},{k:'bottom/leg_r3',c:'#adf',lbl:'R3'}], def:[-120,120]},
  {id:'byaw',  title:'Head yaw (bottom, exact)', unit:'deg',
   keys:[{k:'bottom/head_yaw',c:'#8f8',lbl:'yaw'}], def:[-30,30]},
  {id:'froll', title:'Head roll (front, exact)', unit:'deg',
@@ -405,6 +417,12 @@ const CHANNELS=[
  {id:'wbf',   title:'Wingbeat frequency (bottom)', unit:'Hz', keys:[{k:'bottom/wbf',c:'#f96',lbl:'wbf'}], def:[150,250]},
  {id:'q',     title:'Match quality', unit:'',
   keys:[{k:'bottom/head_q',c:'#7a7',lbl:'bottom'},{k:'front/head_q',c:'#a7a',lbl:'front'}], def:[0,1]},
+ {id:'edges', title:'Edges found per annulus', unit:'', hidden:true,
+  keys:[{k:'bottom/abdomen_n_edges',c:'#f88',lbl:'abd'},
+        {k:'bottom/leg_l3_n_edges',c:'#6af',lbl:'L3'},
+        {k:'bottom/leg_r3_n_edges',c:'#adf',lbl:'R3'},
+        {k:'bottom/left_n_edges',c:'#8f8',lbl:'L'},
+        {k:'bottom/right_n_edges',c:'#cfc',lbl:'R'}], def:[0,4], step:true},
  {id:'lag',   title:'Camera lag', unit:'ms', hidden:true,
   keys:[{k:'bottom/lag_ms',c:'#999',lbl:'bottom'},{k:'front/lag_ms',c:'#c99',lbl:'front'}], def:[0,60]},
 ];

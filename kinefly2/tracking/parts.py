@@ -23,7 +23,7 @@ choice, and one angle out. Nothing downstream distinguishes them from a wing.
 BODY_PARTS = ('head', 'abdomen', 'left', 'right')
 AUX_PART = 'aux'
 
-# tracker name -> (class name in its module, module, overlay colour)
+# tracker name -> (class name in its module, module, fallback overlay colour)
 TRACKER_KINDS = {
     'area':      ('AreaTracker',                   '.tracker_area',      'blue'),
     'edge':      ('EdgeTrackerByIntensityProfile', '.tracker_edge',      'red'),
@@ -32,6 +32,34 @@ TRACKER_KINDS = {
     'rotation':  ('RotationTracker',               '.tracker_rotation',  'green'),
     'intensity': ('IntensityTracker',              '.tracker_intensity', 'hot_pink'),
 }
+
+# Overlay colour per PART, because what you need to tell apart is the parts, not
+# the algorithms behind them. The abdomen and both legs all run `edge`, so
+# colouring by tracker kind drew three overlapping annuli in one red.
+# Override any of these with `color:` in the part's config section.
+PART_COLORS = {
+    'head': 'red',
+    'abdomen': 'red',
+    'left': 'green',
+    'right': 'green',
+    'aux': 'yellow',
+}
+LEG_COLOR = 'blue'          # anything named leg_*
+
+
+def part_color(name, params=None):
+    """The overlay colour for a part: its own `color:` if set, else the scheme
+    above, else the tracker kind's fallback."""
+    chosen = ((params or {}).get(name) or {}).get('color')
+    if chosen:
+        return str(chosen)
+    if name in PART_COLORS:
+        return PART_COLORS[name]
+    if name.startswith('leg'):
+        return LEG_COLOR
+    kind = ((params or {}).get(name) or {}).get('tracker')
+    spec = TRACKER_KINDS.get(kind)
+    return spec[2] if spec else 'white'
 
 
 def extra_parts(params):
@@ -89,19 +117,19 @@ def make_tracker(name, params, bEqualizeHist=False):
         raise ValueError(
             "%s: tracker must be one of %s, got %r"
             % (name, ', '.join(sorted(TRACKER_KINDS)), kind))
-    clsname, modname, color = spec
+    clsname, modname, _ = spec
     import importlib
     mod = importlib.import_module(modname, package=__package__)
     cls = getattr(mod, clsname)
-    if name == AUX_PART:
-        color = 'yellow'
-    return cls(name=name, params=params, color=color, bEqualizeHist=bEqualizeHist)
+    return cls(name=name, params=params, color=part_color(name, params),
+               bEqualizeHist=bEqualizeHist)
 
 
 def part_defaults(name):
     """Tracker-section defaults for a part the config did not fully specify."""
     return {'tracker': 'edge', 'autozero': True, 'threshold': 0.0,
-            'feathering': 0.25, 'saturation_correction': True}
+            'feathering': 0.25, 'saturation_correction': True,
+            'color': part_color(name)}
 
 
 def gui_defaults(name):

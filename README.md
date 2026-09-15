@@ -429,6 +429,11 @@ Traces are drawn with **min/max decimation** — one vertical segment per pixel
 column — so a 60 s window at 90 Hz (5400 points) draws quickly and shows the
 true envelope instead of an aliased subsample. A brief spike is never skipped.
 
+Traces include wing stroke amplitude and L−R, **abdomen bending**, **both hind
+legs**, head yaw/roll/pitch, the stimulus code, wingbeat frequency and match
+quality, plus two diagnostics hidden by default: **edges found per annulus**
+(the check that an edge part is reading one object, section 2.6) and camera lag.
+
 Channel names come from the tracker's own `extra`, so they mean what they say
 whatever the camera view: a ventral camera shows only its exact yaw, and a
 frontal camera shows roll plus pitch and yaw — in **degrees** once that fly's
@@ -751,6 +756,32 @@ leg_r3: 2 edges (want 1) - narrow the sector
 `n_edges_max` and `angle_from` are **per part**, falling back to the rig-wide
 `n_edges_max`. That matters: they used to be shared, so giving the abdomen two
 edges silently changed both wings (left 68.4° → 65.4°).
+
+#### Overlay colours
+
+Colour is **per part**, not per tracker kind — the abdomen and both legs all run
+`edge`, so colouring by algorithm drew three overlapping annuli in one red:
+
+| part | colour |
+|---|---|
+| head, abdomen | red |
+| left, right wing | green |
+| `leg_*` | blue |
+| aux | yellow |
+
+Override any of them with `color:` in that part's config section (any name from
+`ui.bgra_dict`: red, green, blue, cyan, magenta, orange, purple, …):
+
+```yaml
+tracker:
+  leg_r3: {tracker: edge, color: cyan}
+```
+
+Extra parts are draggable exactly like the wings — hinge, the two angle handles
+(which also set `radius_outer`) and the inner-radius handle — and mirror onto
+the part on the other side when `symmetric` is on. Their handles are hit-tested
+**before** the standard four, so a leg handle sitting on top of the abdomen's
+annulus is still grabbable.
 
 #### Declaring extra parts
 
