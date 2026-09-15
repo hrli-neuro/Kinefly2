@@ -5,12 +5,7 @@ import numpy as np
 
 from .imagewindow import ImageWindow
 from .tracker_axis import AxisTracker
-from .tracker_area import AreaTracker
-from .tracker_edge import EdgeTrackerByIntensityProfile, EdgeTrackerByHoughTransform
-from .tracker_tip import TipTracker
-from .tracker_intensity import IntensityTracker
-from .tracker_rotation import RotationTracker
-from .tracker_landmarks import LandmarkTracker
+from . import parts as partspec
 from . import ui
 from . import imageprocessing
 
@@ -23,84 +18,25 @@ class Fly(object):
     def __init__(self, params={}):
         #self.nodename = rospy.get_name().rstrip('/')
         self.nodename = 'kinefly'
-        EdgeTracker = EdgeTrackerByIntensityProfile
-        #EdgeTracker = EdgeTrackerByHoughTransform
-
 
         # Create the body axis tracker.
         self.axis        = AxisTracker(name='axis',      params=params, color='cyan')
 
-        # Create the head tracker.
-        if (params['head']['tracker']=='area'):
-            self.head    = AreaTracker(name='head',      params=params, color='blue',    bEqualizeHist=False)
-        elif (params['head']['tracker']=='edge'):
-            self.head    = EdgeTracker(name='head',      params=params, color='red',    bEqualizeHist=False)
-        elif (params['head']['tracker']=='tip'):
-            self.head    = TipTracker(name='head',       params=params, color='purple',    bEqualizeHist=False)
-        elif (params['head']['tracker']=='landmarks'):
-            self.head    = LandmarkTracker(name='head',      params=params, color='green',    bEqualizeHist=False)
-        elif (params['head']['tracker']=='rotation'):
-            self.head    = RotationTracker(name='head',      params=params, color='green',    bEqualizeHist=False)
-        elif (params['head']['tracker']=='intensity'):
-            self.head    = IntensityTracker(name='head', params=params, color='hot_pink',    bEqualizeHist=False)
-        else:
-            #rospy.logwarn('Head tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
-            print('Head tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
-
-        # Create the abdomen tracker.
-        if (params['abdomen']['tracker']=='area'):
-            self.abdomen    = AreaTracker(name='abdomen',      params=params, color='blue',    bEqualizeHist=False)
-        elif (params['abdomen']['tracker']=='edge'):
-            self.abdomen    = EdgeTracker(name='abdomen',      params=params, color='red',    bEqualizeHist=False)
-        elif (params['abdomen']['tracker']=='tip'):
-            self.abdomen    = TipTracker(name='abdomen',       params=params, color='purple',    bEqualizeHist=False)
-        elif (params['abdomen']['tracker']=='landmarks'):
-            self.abdomen    = LandmarkTracker(name='abdomen',      params=params, color='green',    bEqualizeHist=False)
-        elif (params['abdomen']['tracker']=='rotation'):
-            self.abdomen    = RotationTracker(name='abdomen',      params=params, color='green',    bEqualizeHist=False)
-        elif (params['abdomen']['tracker']=='intensity'):
-            self.abdomen    = IntensityTracker(name='abdomen', params=params, color='hot_pink',    bEqualizeHist=False)
-        else:
-            #rospy.logwarn('Abdomen tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
-             print('Abdomen tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
-
-        # Create the right wing tracker.        
-        if (params['right']['tracker']=='area'):
-            self.right    = AreaTracker(name='right',      params=params, color='blue',    bEqualizeHist=False)
-        elif (params['right']['tracker']=='edge'):
-            self.right    = EdgeTracker(name='right',      params=params, color='red',    bEqualizeHist=False)
-        elif (params['right']['tracker']=='tip'):
-            self.right    = TipTracker(name='right',       params=params, color='purple',    bEqualizeHist=False)
-        elif (params['right']['tracker']=='landmarks'):
-            self.right    = LandmarkTracker(name='right',      params=params, color='green',    bEqualizeHist=False)
-        elif (params['right']['tracker']=='rotation'):
-            self.right    = RotationTracker(name='right',      params=params, color='green',    bEqualizeHist=False)
-        elif params['right']['tracker']== 'intensity':
-            self.right    = IntensityTracker(name='right', params=params, color='hot_pink',    bEqualizeHist=False)
-        else:
-            #rospy.logwarn('Right wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
-            print('Right wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
-             
-        # Create the left wing tracker.        
-        if (params['left']['tracker']=='area'):
-            self.left    = AreaTracker(name='left',      params=params, color='blue',    bEqualizeHist=False)
-        elif (params['left']['tracker']=='edge'):
-            self.left    = EdgeTracker(name='left',      params=params, color='red',    bEqualizeHist=False)
-        elif (params['left']['tracker']=='tip'):
-            self.left    = TipTracker(name='left',       params=params, color='purple',    bEqualizeHist=False)
-        elif (params['left']['tracker']=='landmarks'):
-            self.left    = LandmarkTracker(name='left',      params=params, color='green',    bEqualizeHist=False)
-        elif (params['left']['tracker']=='rotation'):
-            self.left    = RotationTracker(name='left',      params=params, color='green',    bEqualizeHist=False)
-        elif (params['left']['tracker']=='intensity'):
-            self.left    = IntensityTracker(name='left', params=params, color='hot_pink',    bEqualizeHist=False)
-        else:
-            #rospy.logwarn('Left wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
-            print('Left wing tracker parameter must be one of [''area'', ''edge'', ''tip'', ''intensity'', ''rotation'', ''landmarks'']')
-             
-        # Create the aux tracker.        
-        self.aux    = IntensityTracker(name='aux',    params=params, color='yellow',    bEqualizeHist=False)
-             
+        # Every part, built from what its config asks for. The names come from
+        # tracking/parts.py, so a camera that declares extra parts (the hind
+        # legs on the ventral view) gets them here without a code change.
+        self.partnames = partspec.body_parts(params)
+        self.parts = {}
+        for name in partspec.all_parts(params):
+            try:
+                tracker = partspec.make_tracker(name, params)
+            except ValueError as e:
+                print(e)
+                continue
+            self.parts[name] = tracker
+            # fly.head, fly.left, ... still work; extras are reachable the
+            # same way (getattr(fly, 'leg_r3')).
+            setattr(self, name, tracker)
 
         self.windowInvertColorArea      = ImageWindow(False, 'InvertColorArea')
         
@@ -131,11 +67,8 @@ class Fly(object):
         self.params = params
         
         self.axis.set_params(params)
-        self.head.set_params(params)
-        self.abdomen.set_params(params)
-        self.left.set_params(params)
-        self.right.set_params(params)
-        self.aux.set_params(params)
+        for part in self.parts.values():
+            part.set_params(params)
 
         pt1 = [params['gui']['head']['hinge']['x'], params['gui']['head']['hinge']['y']]
         pt2 = [params['gui']['abdomen']['hinge']['x'], params['gui']['abdomen']['hinge']['y']]
@@ -154,35 +87,10 @@ class Fly(object):
         
     
     def create_masks(self, shapeImage):
-        if (self.params['gui']['axis']['track']):
-            if (not self.axis.bValidMask):
-                self.axis.create_mask (shapeImage)
-                self.axis.bValidMask = True
-                
-        if (self.params['gui']['head']['track']):
-            if (not self.head.bValidMask):
-                self.head.create_mask (shapeImage)
-                self.head.bValidMask = True
-                
-        if (self.params['gui']['abdomen']['track']):
-            if (not self.abdomen.bValidMask):
-                self.abdomen.create_mask (shapeImage)
-                self.abdomen.bValidMask = True
-            
-        if (self.params['gui']['right']['track']):
-            if (not self.right.bValidMask):
-                self.right.create_mask (shapeImage)
-                self.right.bValidMask = True
-            
-        if (self.params['gui']['left']['track']):
-            if (not self.left.bValidMask):
-                self.left.create_mask (shapeImage)
-                self.left.bValidMask = True
-            
-        if (self.params['gui']['aux']['track']):
-            if (not self.aux.bValidMask):
-                self.aux.create_mask (shapeImage)
-                self.aux.bValidMask = True
+        for name, part in [('axis', self.axis)] + list(self.parts.items()):
+            if self.params['gui'][name]['track'] and not part.bValidMask:
+                part.create_mask(shapeImage)
+                part.bValidMask = True
 
 
     def get_bodyangle_i(self):
@@ -218,20 +126,14 @@ class Fly(object):
         
                 
     def set_background(self, image):
-        self.head.set_background(image)
-        self.abdomen.set_background(image)
-        self.left.set_background(image)
-        self.right.set_background(image)
-        self.aux.set_background(image)
+        for part in self.parts.values():
+            part.set_background(image)
         self.axis.set_background(image)
 
     
     def update_handle_points(self):
-        self.head.update_handle_points()
-        self.abdomen.update_handle_points()
-        self.left.update_handle_points()
-        self.right.update_handle_points()
-        self.aux.update_handle_points()
+        for part in self.parts.values():
+            part.update_handle_points()
         self.axis.update_handle_points()
         
 
@@ -260,11 +162,8 @@ class Fly(object):
 
             self.stampPrev = self.stamp
 
-            self.head.update(dt, image, self.bInvertColor)
-            self.abdomen.update(dt, image, self.bInvertColor)
-            self.left.update(dt, image, self.bInvertColor)
-            self.right.update(dt, image, self.bInvertColor)
-            self.aux.update(dt, image, self.bInvertColor)
+            for part in self.parts.values():
+                part.update(dt, image, self.bInvertColor)
             self.axis.update(dt, image, self.bInvertColor)
             
             
@@ -272,15 +171,13 @@ class Fly(object):
         # The body-axis line is the frame the wing and abdomen angles are
         # reported in, so it is only meaningful when one of those is tracked.
         # On a frontal camera tracking just the head it means nothing.
-        if any(self.params['gui'][p]['track'] for p in ('left', 'right', 'abdomen')):
+        framed = [p for p in self.partnames if p != 'head']
+        if any(self.params['gui'][p]['track'] for p in framed):
             cv2.line(image, self.ptBodyIndicator1, self.ptBodyIndicator2, self.bgra_body, 1)
-                
+
         self.axis.draw(image)
-        self.head.draw(image)
-        self.abdomen.draw(image)
-        self.left.draw(image)
-        self.right.draw(image)
-        self.aux.draw(image)
+        for part in self.parts.values():
+            part.draw(image)
 
         self.windowInvertColorArea.show()
         
@@ -289,30 +186,12 @@ class Fly(object):
         flystate              = MsgFlyState()
         flystate.header       = Header(seq=self.iCount, stamp=self.stamp, frame_id='Fly')
 
-        if (self.params['gui']['head']['track']):
-            flystate.head     = self.head.state
-        else:
-            flystate.head     = MsgState()
-
-        if (self.params['gui']['abdomen']['track']):
-            flystate.abdomen  = self.abdomen.state
-        else:
-            flystate.abdomen  = MsgState()
-
-        if (self.params['gui']['left']['track']):
-            flystate.left     = self.left.state
-        else:
-            flystate.left     = MsgState()
-            
-        if (self.params['gui']['right']['track']):
-            flystate.right    = self.right.state
-        else:
-            flystate.right    = MsgState()
-            
-        if (self.params['gui']['aux']['track']):
-            flystate.aux      = self.aux.state
-        else:
-            flystate.aux      = MsgState()
+        # An untracked part publishes an empty state rather than a stale one,
+        # so a part switched off mid-session goes to NaN instead of freezing.
+        flystate.partnames = tuple(self.parts)
+        for name, part in self.parts.items():
+            setattr(flystate, name,
+                    part.state if self.params['gui'][name]['track'] else MsgState())
 
         self.iCount += 1
 

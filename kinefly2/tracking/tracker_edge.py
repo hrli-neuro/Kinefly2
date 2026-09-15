@@ -239,7 +239,13 @@ class EdgeTrackerByIntensityProfile(MotionTrackedBodypartPolar):
         else:
             self.sense = 1  
 
-        self.detector.set_params(params[self.name]['threshold'], params['n_edges_max'], self.sense)
+        # n_edges_max is per part, falling back to the rig-wide value. A wing
+        # wants one edge; an abdomen wants both lateral margins. Sharing one
+        # global would make tuning a new part silently rescale the wings.
+        n_edges = (params[self.name].get('n_edges_max')
+                   if params[self.name].get('n_edges_max') is not None
+                   else params['n_edges_max'])
+        self.detector.set_params(params[self.name]['threshold'], n_edges, self.sense)
     
         
     # update_state()
@@ -267,7 +273,26 @@ class EdgeTrackerByIntensityProfile(MotionTrackedBodypartPolar):
                 self.state.gradients.append(gradient)
                 #print(self.state.angles)
 
+            # `angle_from: mean` reports the midpoint of the edges instead of the
+            # first one. That is what turns a pair of silhouette margins into a
+            # centreline: when the abdomen bends, both margins swing together,
+            # and their mean is the bending angle. A wing wants `first` (the
+            # default), which is its leading edge.
+            if self.params[self.name].get('angle_from') == 'mean' and len(self.state.angles) > 1:
+                a = np.array(self.state.angles, dtype=float)
+                # Circular mean, so a pair straddling +/-pi does not average to 0.
+                self.state.angles = [float(np.arctan2(np.mean(np.sin(a)), np.mean(np.cos(a))))] \
+                    + self.state.angles
+
             self.state.intensity = np.mean(imgNow)/255.0
+            # How many edges this annulus found. The count is the thing that
+            # says whether the sector holds ONE object. Measured on a ventral
+            # view: a wide sector behind the thorax caught the hind leg AND
+            # the body margin (1.82 edges per frame), while the same leg in
+            # its own narrow sector gave exactly one in 100% of frames. A
+            # contaminated sector otherwise reports a plausible wrong angle
+            # in silence, so this is surfaced in the GUI and logged.
+            self.state.extra = {'n_edges': float(len(edges))}
 
         
     # update()
@@ -283,6 +308,16 @@ class EdgeTrackerByIntensityProfile(MotionTrackedBodypartPolar):
     # draw()
     # Draw the outline.
     #
+    def status_text(self):
+        """Shown on the overlay: how many edges this sector is finding. Anything
+        but the expected count means the annulus is catching something else."""
+        n = int((self.state.extra or {}).get('n_edges', 0))
+        want = self.params[self.name].get('n_edges_max')
+        want = int(self.params.get('n_edges_max', 1) if want is None else want)
+        if n == want:
+            return ''
+        return '%s: %d edges (want %d) - narrow the sector' % (self.name, n, want)
+
     def draw(self, image):
         MotionTrackedBodypartPolar.draw(self, image)
         

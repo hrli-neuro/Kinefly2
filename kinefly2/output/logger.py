@@ -22,7 +22,14 @@ Layout, one row per merged state (angles in RADIANS; the GUI displays degrees):
                                             two cameras is the other check: with a hardware
                                             trigger (or lockstep replay) they advance
                                             together.
-    /<camera>/<part>_angle, <part>_radius   for head, abdomen, left, right
+    /<camera>/<part>_angle, <part>_radius   for head, abdomen, left, right, plus any extra
+                                            parts the camera declares (`parts:` in its YAML --
+                                            the ventral view's hind legs, leg_l3/leg_r3)
+    /<camera>/<part>_n_edges                edge trackers only: how many edges that annulus
+                                            found this frame. One is what a correctly placed
+                                            sector gives; more means it is catching a second
+                                            leg or the body margin, and the angle is then a
+                                            plausible-looking wrong answer. NaN for other trackers.
     /<camera>/aux_intensity, /<camera>/aux_freq
     /<camera>/head_dx, head_dy              head translation, px (landmarks tracker)
     /<camera>/head_dx_corr, head_dy_corr    same, with the in-plane rotation's own
@@ -66,7 +73,7 @@ import numpy as np
 
 from .base import FlystateSink
 
-PARTS = ('head', 'abdomen', 'left', 'right')
+PARTS = ('head', 'abdomen', 'left', 'right')   # default when a camera does not say
 HEAD_EXTRA = ('dx', 'dy', 'dx_corr', 'dy_corr', 'fit_residual', 'score',
               'd_axial', 'd_lateral', 'roll', 'pitch', 'yaw', 'roll_sigma')
 # Anatomical channels the landmark tracker fills; which one is the exact
@@ -76,9 +83,13 @@ CHUNK = 1024
 
 
 class Hdf5Logger(FlystateSink):
-    def __init__(self, path, cameras, metadata=None):
+    def __init__(self, path, cameras, metadata=None, parts=None):
+        """`parts` maps camera -> the angle-bearing parts it tracks, so a camera
+        declaring extra parts (hind legs on the ventral view) gets columns for
+        them. Cameras not named fall back to the standard four."""
         self.path = str(path)
         self.cameras = list(cameras)
+        self.parts = {cam: tuple((parts or {}).get(cam) or PARTS) for cam in self.cameras}
         self.queue = queue.Queue(maxsize=10000)
         self.file = h5py.File(self.path, 'w')
         self.datasets = {}
@@ -98,9 +109,10 @@ class Hdf5Logger(FlystateSink):
         for cam in self.cameras:
             for col in ('seq', 't_camera', 't_host', 't_done', 'age'):
                 add('%s/%s' % (cam, col))
-            for part in PARTS:
+            for part in self.parts[cam]:
                 add('%s/%s_angle' % (cam, part))
                 add('%s/%s_radius' % (cam, part))
+                add('%s/%s_n_edges' % (cam, part))
             add('%s/aux_intensity' % cam)
             add('%s/aux_freq' % cam)
             for col in HEAD_EXTRA:          # landmarks tracker only (NaN otherwise)
@@ -132,9 +144,10 @@ class Hdf5Logger(FlystateSink):
             if cs is None:
                 for col in ('seq', 't_camera', 't_host', 't_done', 'age'):
                     row['%s/%s' % (cam, col)] = math.nan
-                for part in PARTS:
+                for part in self.parts[cam]:
                     row['%s/%s_angle' % (cam, part)] = math.nan
                     row['%s/%s_radius' % (cam, part)] = math.nan
+                    row['%s/%s_n_edges' % (cam, part)] = math.nan
                 row['%s/aux_intensity' % cam] = math.nan
                 row['%s/aux_freq' % cam] = math.nan
                 for col in HEAD_EXTRA:
@@ -148,10 +161,15 @@ class Hdf5Logger(FlystateSink):
             # blanked it), so every measurement below falls through to NaN
             # while seq/t_camera/age stay to say what happened.
             row['%s/age' % cam] = merged.age(cam)
-            for part in PARTS:
+            for part in self.parts[cam]:
                 ps = cs.parts.get(part)
                 row['%s/%s_angle' % (cam, part)] = ps.angle if ps else math.nan
                 row['%s/%s_radius' % (cam, part)] = ps.radius if ps else math.nan
+                # Edge trackers only: how many edges the annulus found. Anything
+                # but the expected count means the sector caught something else,
+                # and the angle above is then a plausible-looking wrong answer.
+                row['%s/%s_n_edges' % (cam, part)] = (
+                    (ps.extra or {}).get('n_edges', math.nan) if ps else math.nan)
             aux = cs.parts.get('aux')
             row['%s/aux_intensity' % cam] = aux.intensity if aux else math.nan
             row['%s/aux_freq' % cam] = aux.freq if aux else math.nan

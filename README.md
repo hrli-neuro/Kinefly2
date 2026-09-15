@@ -658,7 +658,119 @@ wing asymmetry and small hinge-placement error. Nothing subtracts it: the log
 keeps raw angles. Subtract a per-fly offset in analysis if you need to compare
 absolute amplitudes across flies, taking the mean over a quiescent epoch.
 
-### 2.6 Timing validation
+### 2.6 Abdomen and legs from the ventral view
+
+The bottom camera is a **backlit silhouette**: the fly is near-black on a bright
+field, with no internal texture anywhere. That one fact decides the method for
+every ventral part.
+
+**Why these do not use `landmarks`.** Template matching needs locally
+distinctive structure. Measuring it directly (Shi-Tomasi min-eigenvalue over a
+13 px window, the size of the head templates), with the four *working* head
+landmarks as the baseline:
+
+| region | pixels reaching the head-landmark baseline |
+|---|---|
+| head | 24.9 % |
+| thorax | 11.2 % |
+| legs | 1.9 % |
+| **abdomen** | **0.0 %** |
+
+The head landmarks work because the head has outline **corners** — antennae,
+proboscis, the neck notch — not because it has texture. The abdomen is a smooth
+ellipse, and a template placed there **fails (score < 0.8) in 46 % of frames**
+against the head landmark's 0 %. A leg fails for a second reason: it is a thin
+bar, so a patch on the shaft slides along it with no penalty. And `landmarks`
+fits one *rigid* body, which neither a bending abdomen nor a jointed leg is.
+
+So both use the **edge** tracker, which thrives on what defeats template
+matching: 129 grey levels of contrast at the silhouette boundary.
+
+#### The abdomen
+
+`tracker: edge` with `n_edges_max: 2` and `angle_from: mean`: the annulus finds
+the abdomen's two lateral margins, and their circular mean is the bending angle
+— the same mechanism as a wing edge, with the midpoint standing in for the
+centreline. Roll is not recoverable from a 2D ventral view and is not reported.
+
+**Background subtraction is not optional here.** The tether silhouette merges
+with the abdomen, and it is the most static thing in the frame (temporal std
+**0.91**, below even the background's 2.44), so it subtracts cleanly. Measured
+on one recording, with everything else identical:
+
+| `subtract_bg` | abdomen angle std | range |
+|---|---|---|
+| false | **10.99°** | 47.1° |
+| **true** | **1.51°** | 11.3° |
+
+Without it the tracker is reading the holder. Capture a background with `saveBG`
+(fly absent or unlit), or let `run_offline --make-bg` build a median one —
+anything that moves vanishes, the static scene remains.
+
+#### The hind legs — machinery ready, tuning not finished
+
+`leg_l3` and `leg_r3` are declared in `config/camera_bottom.yaml` but ship with
+**`track: false`**, deliberately. The parts, the columns and the GUI handles all
+work; what is not established is that the edge they find is the leg.
+
+What was measured on `260910_fly119`, so you know what to aim for and what to
+distrust:
+
+- A sector can be made clean. A wide annulus behind the thorax caught the leg
+  **and** the body margin (1.82 edges per frame); narrowed per leg, both legs
+  give **exactly one edge in 100 % of frames**.
+- One edge is not proof it is the right edge. The best configuration found
+  (coxa-anchored, r 25-55) gives a smooth trace — lag-1 autocorrelation
+  0.70-0.80, so a real variable rather than noise — but correlates **r = -0.36**
+  with the angular centroid of the actual moving leg pixels. Negative: it is
+  following the body/abdomen margin, which swings the other way as the leg moves.
+- Pointing the annulus clear of the body instead gives autocorrelation ≈ 0,
+  i.e. noise: a 3-5 px leg does not produce a strong enough radial edge in a
+  background-subtracted annulus at 384x336.
+
+**So before trusting a leg channel, check two things**: that
+`<cam>/<part>_n_edges` is 1 on essentially every frame, *and* that the annulus
+does not overlap the body silhouette. The first is necessary; the second is what
+this rig has not yet satisfied — which may mean a tighter ROI, more pixels on the
+fly, or that the hind legs are not resolvable from this view.
+
+#### Tuning a sector
+
+Each part is configured exactly like a wing: hinge, `radius_inner`/`radius_outer`,
+and an angular window. `angle_lo`/`angle_hi` are in the **body frame**, which is
+`body_axis_deg` away from the image frame — 3.87° on this rig, so they read
+almost as image angles.
+
+The readout to watch is the edge count. When a sector finds more than the
+`n_edges_max` it was given, the overlay says so:
+
+```
+leg_r3: 2 edges (want 1) - narrow the sector
+```
+
+`n_edges_max` and `angle_from` are **per part**, falling back to the rig-wide
+`n_edges_max`. That matters: they used to be shared, so giving the abdomen two
+edges silently changed both wings (left 68.4° → 65.4°).
+
+#### Declaring extra parts
+
+A camera YAML names them, and everything else follows — tracker, GUI handles,
+HDF5 columns, a dashboard panel:
+
+```yaml
+tracker:
+  parts: [leg_l3, leg_r3]
+  leg_r3: {tracker: edge, threshold: 0.0, n_edges_max: 1}
+  gui:
+    leg_r3: {track: true, subtract_bg: true, hinge: {x: 165, y: 238},
+             radius_inner: 25, radius_outer: 55, angle_lo: 2.53, angle_hi: 3.49}
+```
+
+Each part's zero is its **opposite number**: `leg_l3` pairs with `leg_r3` the way
+the wings pair with each other (section 2.5.5), so a symmetric posture reads
+L = R. Names pair by their `_l`/`_r` side suffix.
+
+### 2.7 Timing validation
 
 ```bash
 python -m kinefly2.apps.check_latency config/camera_bottom.yaml --seconds 30
@@ -667,7 +779,7 @@ python -m kinefly2.apps.check_latency config/camera_bottom.yaml --seconds 30
 Healthy rig numbers at 90 Hz: interval median ≈ 11.1 ms, dropped frames = 0,
 track median in the low milliseconds.
 
-### 2.7 GUI controls (same UX as Kinefly)
+### 2.8 GUI controls (same UX as Kinefly)
 
 - **Handles (drag with mouse):** hinge points mark each part's joint; wing
   hinge points sit on the wing bases; for each part, the two line handles set
@@ -883,6 +995,7 @@ displacements are always pixels.
 
 ```
 kinefly2/tracking/   Kinefly/Benifly image-processing core (trackers, polar transforms, GUI widgets)
+kinefly2/tracking/parts.py  which parts exist and which tracker each gets (section 2.6)
 kinefly2/camera/     FrameSource abstraction: pyspin_source, video_source, opencv_source
 kinefly2/core/       CameraPipeline (per-camera thread), StateMerger, flystate dataclasses
 kinefly2/output/     FlystateSink interface, ZMQ publisher, HDF5 logger; future panels driver
@@ -945,6 +1058,16 @@ tests/               synthetic-video generator + ground-truth and architecture t
       show 6-16x more than it said). Sweep from the left, drag/wheel/minimap
       navigation, markers for stimulus onsets and recording start/stop, and
       `--file` to open a saved recording in the same page.
+- [x] Body parts are declared by config, not hard-coded (2026-09-15): one part
+      list plus a tracker factory replaced ~18 copies of the part names and six
+      near-identical if/elif blocks, verified bit-identical on a real recording.
+      Abdomen measured from its silhouette margins with the holder subtracted
+      (angle std 10.99 -> 1.51 deg).
+- [ ] Hind-leg angles: the parts and the edge-count diagnostic are in place but
+      ship `track: false`. A clean single-edge sector is achievable (100% of
+      frames), but the best one found correlates r = -0.36 with the real leg
+      motion -- it is reading the body margin. Needs a tighter ROI or more
+      pixels on the fly; see section 2.6.
 - [ ] First run against real FLIR cameras: verify ROI and the primary/secondary
       trigger wiring, and confirm 90 Hz on both views at the chosen ROI.
 - [ ] Confirm the lever arm across several flies, and decide whether it can be

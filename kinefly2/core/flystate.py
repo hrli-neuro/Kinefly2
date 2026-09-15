@@ -66,8 +66,9 @@ class CameraState:
 
     @classmethod
     def from_flystate_msg(cls, camera, msg, frame, t_done):
+        names = getattr(msg, 'partnames', None) or ('head', 'abdomen', 'left', 'right', 'aux')
         parts = {name: BodypartState.from_msg(getattr(msg, name))
-                 for name in ('head', 'abdomen', 'left', 'right', 'aux')}
+                 for name in names if hasattr(msg, name)}
         return cls(camera=camera, seq=msg.header.seq, t_camera=frame.t_camera,
                    t_host=frame.t_host, t_done=t_done, parts=parts)
 

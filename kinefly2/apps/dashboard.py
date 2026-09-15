@@ -47,7 +47,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_HISTORY_S = 300.0       # server buffer: one recording's worth (experiments run < 3 min)
 MAX_ROWS = 120000           # hard cap, so a reset frame clock cannot grow the buffer forever
-PARTS = ('left', 'right', 'head', 'abdomen')
+PARTS = ('left', 'right', 'head', 'abdomen')   # drawn first; extras follow in order
 
 
 def clean(x):
@@ -111,7 +111,11 @@ class StateBuffer:
             row['%s/lag_ms' % cam] = None if age is None else age * 1e3
         for cam, cs in (state.get('cameras') or {}).items():
             parts = cs.get('parts') or {}
-            for part in PARTS:
+            # Whatever the camera actually tracks, not a fixed list: a ventral
+            # camera may declare extra parts (hind legs) that a frontal one
+            # does not.
+            names = list(PARTS) + [p for p in parts if p not in PARTS and p != 'aux']
+            for part in names:
                 a = ((parts.get(part) or {}).get('angles') or [None])[0]
                 row['%s/%s' % (cam, part)] = None if a is None else math.degrees(a)
             head = parts.get('head') or {}
@@ -245,7 +249,10 @@ def rows_from_h5(path):
 
     put('stim', 'merged/stim')
     for cam in cams:
-        for part in PARTS:
+        # Column names in the file are the authority on what this camera tracked.
+        extra = sorted({k.split('/')[1][:-6] for k in log
+                        if k.startswith(cam + '/') and k.endswith('_angle')} - set(PARTS))
+        for part in list(PARTS) + extra:
             put('%s/%s' % (cam, part), '%s/%s_angle' % (cam, part), 'deg')
         for name in ('roll', 'pitch', 'yaw'):
             put('%s/head_%s' % (cam, name), '%s/head_%s' % (cam, name), 'deg')

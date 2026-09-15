@@ -24,6 +24,7 @@ from ..tracking import ui
 from ..tracking import imageprocessing
 from ..tracking.fly import Fly
 from ..tracking.setdict import SetDict
+from ..tracking import parts as partspec
 from ..tracking.MsgFlyState import Header
 
 
@@ -121,7 +122,15 @@ class TrackerView:
             self.config = yaml.safe_load(f) or {}
 
         self.params = self.config.get('tracker') or {}
-        SetDict().set_dict_with_preserve(self.params, tracker_defaults())
+        defaults = tracker_defaults()
+        # A camera may declare extra angle-bearing parts (hind legs on the
+        # ventral view). Give each one a full default section so the rest of
+        # the GUI can treat it exactly like a wing.
+        for extra in partspec.extra_parts(self.params):
+            defaults.setdefault(extra, partspec.part_defaults(extra))
+            defaults['gui'].setdefault(extra, partspec.gui_defaults(extra))
+        SetDict().set_dict_with_preserve(self.params, defaults)
+        self.partnames = partspec.body_parts(self.params)
         self.params = self.legalize_params(self.params)
         # Freeze the body frame the wing angles are reported in. Seeded from the
         # head/abdomen hinges so existing recordings stay comparable, then held
@@ -172,7 +181,7 @@ class TrackerView:
         else:
             self.bHaveBackground = False
 
-        for partname in ('head', 'abdomen', 'left', 'right'):
+        for partname in self.partnames:
             part = getattr(self.fly, partname)
             if hasattr(part, 'load_templates'):
                 part.load_templates(self.templates_path(partname))
@@ -206,14 +215,14 @@ class TrackerView:
         self.ibtnInvertColor = None
 
         print('%s: trackers  %s' % (name, '  '.join(
-            '%s=%s' % (p, self.params[p]['tracker']) for p in ('head', 'abdomen', 'left', 'right')
+            '%s=%s' % (p, self.params[p]['tracker']) for p in self.partnames
             if self.params['gui'][p]['track'])))
         # `autozero` is inherited from Kinefly but only the area and rotation
         # trackers read it. Left in a config it reads as though the wings were
         # being auto-zeroed, which they are not -- their zero is geometric
         # (the line joining the wing hinges). Say so rather than editing the
         # config, since the key goes live again if that part switches tracker.
-        inert = [p for p in ('head', 'abdomen', 'left', 'right')
+        inert = [p for p in self.partnames
                  if self.params['gui'][p]['track']
                  and self.params[p].get('autozero')
                  and self.params[p]['tracker'] not in ('area', 'rotation')]
@@ -251,8 +260,12 @@ class TrackerView:
             out[partname] = [[float(p['x']), float(p['y'])] for p in lms]
         return out
 
+    def part_names(self):
+        """The angle-bearing parts this camera tracks, for the logger's columns."""
+        return list(self.partnames)
+
     def landmark_parts(self):
-        return [p for p in ('head', 'abdomen', 'left', 'right')
+        return [p for p in self.partnames
                 if self.params[p].get('tracker') == 'landmarks']
 
     def templates_path(self, partname):
@@ -297,7 +310,7 @@ class TrackerView:
                 return None
             done = []
             moved = False
-            for partname in ('head', 'abdomen', 'left', 'right'):
+            for partname in self.partnames:
                 if not self.params['gui'][partname]['track']:
                     continue
                 part = getattr(self.fly, partname)
@@ -330,7 +343,7 @@ class TrackerView:
 
     def legalize_params(self, paramsIn):
         paramsOut = copy.copy(paramsIn)
-        for partname in ['head', 'abdomen', 'left', 'right']:
+        for partname in partspec.body_parts(paramsOut):
             p = paramsOut['gui'][partname]
             if 'hinge' in p:
                 p['hinge']['x'] = max(0, p['hinge']['x'])
@@ -344,7 +357,7 @@ class TrackerView:
 
     def scale_params(self, paramsIn, scale):
         paramsScaled = copy.deepcopy(paramsIn)
-        for partname in ['head', 'abdomen', 'left', 'right']:
+        for partname in partspec.body_parts(paramsIn):
             paramsScaled['gui'][partname]['hinge']['x'] = paramsIn['gui'][partname]['hinge']['x'] * scale
             paramsScaled['gui'][partname]['hinge']['y'] = paramsIn['gui'][partname]['hinge']['y'] * scale
             paramsScaled['gui'][partname]['radius_outer'] = paramsIn['gui'][partname]['radius_outer'] * scale
@@ -354,7 +367,7 @@ class TrackerView:
             paramsScaled['gui'][partname]['center']['y'] = paramsIn['gui'][partname]['center']['y'] * scale
             paramsScaled['gui'][partname]['radius1'] = paramsIn['gui'][partname]['radius1'] * scale
             paramsScaled['gui'][partname]['radius2'] = paramsIn['gui'][partname]['radius2'] * scale
-        for partname in ['head', 'abdomen', 'left', 'right']:
+        for partname in partspec.body_parts(paramsIn):
             lms = paramsIn['gui'][partname].get('landmarks')
             if lms:
                 paramsScaled['gui'][partname]['landmarks'] = [
@@ -386,7 +399,7 @@ class TrackerView:
         self._write_tracker_section(on_disk, tracker)
         # Tell the user when the file now asks for a different tracker type
         # than the one running (needs a restart to take effect).
-        for part in ('head', 'abdomen', 'left', 'right'):
+        for part in self.partnames:
             want = (tracker.get(part) or {}).get('tracker')
             have = (self.params.get(part) or {}).get('tracker')
             if want and have and want != have:
@@ -1040,7 +1053,7 @@ class TrackerView:
                         self.buttons[iButtonSelected].state = state = False
                         print('%s: no background image; cannot subtract for abdomen.' % self.name)
                     self.params['gui']['abdomen']['subtract_bg'] = state
-                elif name in ('head', 'abdomen', 'left', 'right', 'aux'):
+                elif name in tuple(self.partnames) + ('aux',):
                     self.params['gui'][name]['track'] = state
                 elif name == 'invertcolor':
                     self.fly.bInvertColor = state
@@ -1048,7 +1061,7 @@ class TrackerView:
                     self.fly.bInvertColorAuto = False
                     self.params['invertcolor'] = bool(state)
                 elif name == 'stabilize':
-                    for partname in ('head', 'abdomen', 'left', 'right'):
+                    for partname in self.partnames:
                         self.params['gui'][partname]['stabilize'] = state
                 elif name == 'windows':
                     self.params['gui']['windows'] = state

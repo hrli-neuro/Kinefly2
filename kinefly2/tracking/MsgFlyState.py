@@ -7,6 +7,10 @@ class MsgFlyState:
         self.left           = []
         self.right          = []
         self.aux            = []
+        # Which parts this message actually carries. A camera may declare extra
+        # parts (hind legs on the ventral view), so consumers read this rather
+        # than assuming the standard five.
+        self.partnames      = ('head', 'abdomen', 'left', 'right', 'aux')
 
 class MsgState:
     def __init__(self):

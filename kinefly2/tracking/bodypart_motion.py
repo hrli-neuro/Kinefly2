@@ -7,6 +7,7 @@ import threading
 
 from .imagewindow import ImageWindow
 from . import imageprocessing
+from . import parts
 from . import ui
 
 class Struct:
@@ -112,11 +113,11 @@ class MotionTrackedBodypart(object):
         # The two conventions coincide when the wing hinges sit symmetrically
         # about the head-abdomen line, which is why the synthetic test fixture
         # is unaffected by the change.
-        nameRelative = {'head': 'abdomen',
-                        'abdomen': 'head',
-                        'left': 'right',
-                        'right': 'left'}
-        other = nameRelative.get(self.name)
+        # parts.opposite() extends this to any part a camera declares: a hind
+        # leg is referenced to the leg on the other side, exactly as a wing is.
+        other = parts.opposite(self.name)
+        if other is not None and other not in (self.params.get('gui') or {}):
+            other = None          # counterpart not configured on this camera
         if other is not None:
             self.angleBodypart_i = float(np.arctan2(self.params['gui'][self.name]['hinge']['y']-self.params['gui'][other]['hinge']['y'], 
                                                     self.params['gui'][self.name]['hinge']['x']-self.params['gui'][other]['hinge']['x']))

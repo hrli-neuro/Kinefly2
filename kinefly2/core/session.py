@@ -80,13 +80,17 @@ class RecordingSession:
                 meta = {'lever_px': exp.lever_px or {}, 'landmarks': {},
                         'rig': {'primary': self.merger.primary,
                                 'cameras': list(self.pipelines),
+                                'parts': {c: v.part_names() for c, v in self.views.items()
+                                          if hasattr(v, 'part_names')},
                                 'stale_after_s': self.merger.stale_after_s},
                         **provenance()}
                 for cam, view in self.views.items():
                     if hasattr(view, 'landmark_geometry'):
                         meta['landmarks'][cam] = view.landmark_geometry()
+                parts = {cam: view.part_names() for cam, view in self.views.items()
+                         if hasattr(view, 'part_names')}
                 logger = Hdf5Logger(exp.path('_flystate.h5'), cameras=list(self.pipelines),
-                                    metadata=meta)
+                                    metadata=meta, parts=parts)
                 self.merger.add_sink(logger)
             recorders = {}
             if exp.record_video:

@@ -20,6 +20,7 @@ import math
 
 import cv2
 import numpy as np
+from ..tracking import parts
 
 POINT_KEYS = (('gui', 'head', 'hinge'), ('gui', 'abdomen', 'hinge'),
               ('gui', 'left', 'hinge'), ('gui', 'right', 'hinge'),
@@ -36,7 +37,7 @@ def _all_points(params):
     """Every image-space point dict in the params: hinges/centers/axis points
     and any per-part landmark lists."""
     pts = [_get(params, keys) for keys in POINT_KEYS]
-    for part in ('head', 'abdomen', 'left', 'right'):
+    for part in parts.body_parts(params):
         pts.extend(params['gui'][part].get('landmarks') or [])
     return pts
 
