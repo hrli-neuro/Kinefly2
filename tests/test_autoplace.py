@@ -142,6 +142,30 @@ def test_safety_and_reset():
     assert abs(view.params['gui']['head']['hinge']['x'] - startup['x']) < 1e-6
     print('safety/reset OK')
 
+def test_extra_parts_move_and_stay_inside():
+    """A camera's extra parts (the hind legs) move with autoplace and are kept
+    inside the image like the standard four. They used to be left out: the
+    whole fly moved but its leg annuli stayed behind, and clamping could leave
+    a leg handle off-screen where it could not be grabbed."""
+    ensure_synthetic()
+    import yaml
+    from kinefly2.gui import autoplace
+    from kinefly2.tracking import parts as partspec
+    params = yaml.safe_load(open(VID_CFG))['tracker']
+    params['parts'] = ['leg_l3', 'leg_r3']
+    for leg, x in (('leg_l3', 150.0), ('leg_r3', 200.0)):
+        params['gui'][leg] = dict(partspec.gui_defaults(leg), hinge={'x': x, 'y': 290.0})
+    moved, _ = autoplace.transform_params(params, np.float32([[1, 0, 12], [0, 1, -7]]))
+    for leg, x in (('leg_l3', 150.0), ('leg_r3', 200.0)):
+        h = moved['gui'][leg]['hinge']
+        assert abs(h['x'] - (x + 12)) < 1e-6 and abs(h['y'] - 283.0) < 1e-6, (leg, h)
+    params['gui']['leg_r3']['hinge'] = {'x': 500.0, 'y': -40.0}     # off the 352x352 frame
+    assert not autoplace.points_inside(params, (352, 352))
+    clamped = autoplace.clamp_to_image(params, (352, 352))
+    assert autoplace.points_inside(clamped, (352, 352))
+    print('extra parts follow autoplace and clamping')
+
+
 def test_save_params_keeps_hand_edits():
     """A click must not overwrite hand edits made to the YAML after launch."""
     ensure_synthetic()
@@ -182,5 +206,6 @@ if __name__ == '__main__':
     test_register_known_transform()
     test_silhouette_bootstrap()
     test_safety_and_reset()
+    test_extra_parts_move_and_stay_inside()
     test_save_params_keeps_hand_edits()
     print('OK')

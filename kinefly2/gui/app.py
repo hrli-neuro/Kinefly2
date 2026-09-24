@@ -130,10 +130,26 @@ def tracker_defaults():
 
 
 class TrackerView:
-    def __init__(self, name, config_path, use_gui=True):
+    def __init__(self, name, config_path, use_gui=True, replay=False, toolbar=True,
+                 asset_stem=None):
+        """`replay`: frames come from a recorded video, which has no frame
+        without the fly in it, so the toolbar leaves out saveBG (capture this
+        frame as the background); the background is the video's median instead.
+        `toolbar=False` draws no buttons at all -- offline analysis shows the
+        overlay while nothing may be edited.
+
+        `asset_stem` names this camera's background, reference frame and
+        landmark templates <stem>_background.png, <stem>_reference.png and
+        <stem>_<part>_templates.npz; an offline analysis labels them with the
+        run and camera. Without it they sit next to the config under the rig's
+        names: background_<camera>.png, reference_<camera>.png,
+        templates_<camera>_<part>.npz."""
         self.name = name
         self.config_path = str(config_path)
         self.use_gui = use_gui
+        self.replay = replay
+        self.toolbar = toolbar
+        self.asset_stem = asset_stem
         self.window_name = 'kinefly2: %s' % name
         self.lock = threading.RLock()
         self.bQuit = False
@@ -189,14 +205,22 @@ class TrackerView:
 
         # Background image for subtraction, stored next to the config file.
         cfg_dir = os.path.dirname(os.path.abspath(self.config_path))
-        self.filenameBackground = os.path.join(cfg_dir, 'background_%s.png' % name)
-        self.filenameReference = os.path.join(cfg_dir, 'reference_%s.png' % name)
+        if self.asset_stem:
+            self.filenameBackground = self.asset_stem + '_background.png'
+            self.filenameReference = self.asset_stem + '_reference.png'
+        else:
+            self.filenameBackground = os.path.join(cfg_dir, 'background_%s.png' % name)
+            self.filenameReference = os.path.join(cfg_dir, 'reference_%s.png' % name)
         self.statusText = ''
+        # Kept in memory as well, so the running background model can be
+        # restarted from it (reset_background_model).
+        self.imgBackground = None
         imgDisk = cv2.imread(self.filenameBackground, cv2.IMREAD_GRAYSCALE)
         if imgDisk is not None:
             if self.scale != 1.0:
                 imgDisk = cv2.resize(imgDisk, (0, 0), fx=self.scale, fy=self.scale)
             self.fly.set_background(imgDisk)
+            self.imgBackground = imgDisk
             self.bHaveBackground = True
         else:
             self.bHaveBackground = False
@@ -289,6 +313,8 @@ class TrackerView:
                 if self.params[p].get('tracker') == 'landmarks']
 
     def templates_path(self, partname):
+        if self.asset_stem:
+            return '%s_%s_templates.npz' % (self.asset_stem, partname)
         cfg_dir = os.path.dirname(os.path.abspath(self.config_path))
         return os.path.join(cfg_dir, 'templates_%s_%s.npz' % (self.name, partname))
 
@@ -320,6 +346,36 @@ class TrackerView:
         self.fly.set_params(self.scale_params(self.params, self.scale))
         self.refresh_landmark_templates(partname)
         self.save_params()
+
+    def persist_templates(self):
+        """Write every landmark part's templates as they are now.
+
+        Templates the tracker cut by itself on the first frame are otherwise
+        never saved, so a later run of this config would cut its own on ITS
+        first frame -- a different zero from the one on screen. Offline analysis
+        calls this when setup ends, so the analysis starts from exactly the
+        templates the user saw working. Returns the parts written."""
+        with self.lock:
+            saved = []
+            for partname in self.landmark_parts():
+                part = getattr(self.fly, partname)
+                if part.save_templates(self.templates_path(partname)):
+                    saved.append(partname)
+            return saved
+
+    def reset_background_model(self):
+        """Restart every part's running background from the background image,
+        discarding what the moving average has absorbed since.
+
+        The model adapts with the time between frames, and a frame that does
+        not follow the previous one -- a seek, a step back, a paused frame
+        tracked again, which counts as a whole second -- would let it soak up
+        the current frame, fly and all. The offline player calls this after
+        each of those, so the setup view keeps showing what the analysis will
+        see."""
+        with self.lock:
+            if self.imgBackground is not None:
+                self.fly.set_background(self.imgBackground)
 
     def zero_all(self):
         """'This posture = zero' for every tracked part: landmark templates are
@@ -644,12 +700,19 @@ class TrackerView:
             self.buttons.append(btn)
             return btn
 
+        if not self.toolbar:
+            self.yToolbar = 0
+            return
         add(type='pushbutton', name='exit', text='exit')
-        add(type='pushbutton', name='save_bg', text='saveBG')
+        if not self.replay:
+            add(type='pushbutton', name='save_bg', text='saveBG')
         add(type='pushbutton', name='autoplace', text='autoplace')
         add(type='pushbutton', name='reset', text='reset')
         add(type='pushbutton', name='zero', text='zero')
-        add(type='pushbutton', name='record', text='record')
+        # Only where something starts a recording (run_rig); elsewhere the
+        # button would do nothing.
+        if self.on_record is not None:
+            add(type='pushbutton', name='record', text='record')
         # One pair of buttons per landmark part, so every part is reachable
         # (a single pair could only ever address the first one).
         for partname in self.landmark_parts():
@@ -698,6 +761,7 @@ class TrackerView:
         print('%s: saving new background image to %s' % (self.name, self.filenameBackground))
         cv2.imwrite(self.filenameBackground, self.imgUnscaled)
         self.fly.set_background(self.imgScaled)
+        self.imgBackground = self.imgScaled.copy()
         self.bHaveBackground = True
 
     def apply_params(self, params, status, save=True):

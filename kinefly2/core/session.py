@@ -137,6 +137,8 @@ class RecordingSession:
             if summary['stale']:
                 msg += '  STALE %s' % ', '.join('%s=%d rows' % kv
                                                 for kv in sorted(summary['stale'].items()))
+            if summary['log_dropped']:
+                msg += '  LOG DROPPED %d rows (disk too slow)' % summary['log_dropped']
             print(msg)
             return summary
 
@@ -146,6 +148,8 @@ class RecordingSession:
              'duration': time.monotonic() - a['t_start'],
              'rows': a['logger'].n if a['logger'] is not None else 0,
              'events': a['logger'].n_events if a['logger'] is not None else 0,
+             # Rows the logger had to drop because the disk fell behind.
+             'log_dropped': a['logger'].n_dropped if a['logger'] is not None else 0,
              'video': {n: {'written': r.n_written, 'dropped': r.n_dropped}
                        for n, r in a['recorders'].items()},
              'frames': {n: p.n_frames - a['frames_start'][n] for n, p in self.pipelines.items()}}

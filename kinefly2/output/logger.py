@@ -61,7 +61,10 @@ t_host is time.monotonic() (shared by all rows and events in this file);
 t_wall is time.time() so other programs' timestamps can be aligned.
 
 Writes happen on a dedicated thread fed by a queue so disk I/O can never stall
-the tracking loop. Missing cameras/parts are NaN.
+the tracking loop: live, a full queue drops the row (counted in n_dropped)
+rather than wait. Offline analysis passes block=True instead -- nothing there is
+real time, and every frame must land -- and mode='x', so an existing file is
+never truncated. Missing cameras/parts are NaN.
 """
 import math
 import queue
@@ -83,18 +86,24 @@ CHUNK = 1024
 
 
 class Hdf5Logger(FlystateSink):
-    def __init__(self, path, cameras, metadata=None, parts=None):
+    def __init__(self, path, cameras, metadata=None, parts=None, mode='w', block=False):
         """`parts` maps camera -> the angle-bearing parts it tracks, so a camera
         declaring extra parts (hind legs on the ventral view) gets columns for
-        them. Cameras not named fall back to the standard four."""
+        them. Cameras not named fall back to the standard four.
+
+        `mode` is h5py's: 'w' truncates an existing file, 'x' refuses to open
+        one. `block` makes handle() wait for the writer when the queue is full
+        instead of dropping the row."""
         self.path = str(path)
         self.cameras = list(cameras)
         self.parts = {cam: tuple((parts or {}).get(cam) or PARTS) for cam in self.cameras}
+        self.block = bool(block)
         self.queue = queue.Queue(maxsize=10000)
-        self.file = h5py.File(self.path, 'w')
+        self.file = h5py.File(self.path, mode)
         self.datasets = {}
         self.n = 0
         self.n_events = 0
+        self.n_dropped = 0          # Rows lost to a full queue (never when blocking).
         self.closed = False
 
         def add(name, dtype='f8'):
@@ -188,17 +197,24 @@ class Hdf5Logger(FlystateSink):
             ex = hd.extra if lm else {}
             for col in LM_EXTRA:
                 row['%s/head_%s' % (cam, col)] = ex.get(col, math.nan)
+        if self.block:
+            self.queue.put(('state', row))
+            return
         try:
             self.queue.put_nowait(('state', row))
         except queue.Full:
-            pass  # Losing a log row beats stalling the closed loop.
+            self.n_dropped += 1   # Losing a log row beats stalling the closed loop.
 
     def log_event(self, text, t_host=None, t_wall=None):
-        """Record an experiment event (thread-safe; never blocks)."""
+        """Record an experiment event (thread-safe; never blocks unless the
+        logger was made blocking)."""
         if self.closed:
             return
         item = ('event', t_host if t_host is not None else time.monotonic(),
                 t_wall if t_wall is not None else time.time(), str(text))
+        if self.block:
+            self.queue.put(item)
+            return
         try:
             self.queue.put_nowait(item)
         except queue.Full:
@@ -236,7 +252,9 @@ class Hdf5Logger(FlystateSink):
             return
         self.closed = True
         self.queue.put(None)
-        self.thread.join(timeout=30)
+        # A blocking logger has promised every row, so it waits for all of them
+        # to be written; a live one gives up rather than hang the shutdown.
+        self.thread.join(timeout=None if self.block else 30)
         for name, ds in self.datasets.items():
             ds.resize((self.n_events if name.startswith('events/') else self.n,))
         self.file.close()

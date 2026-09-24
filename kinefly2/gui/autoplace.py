@@ -34,9 +34,16 @@ def _get(d, keys):
 
 
 def _all_points(params):
-    """Every image-space point dict in the params: hinges/centers/axis points
-    and any per-part landmark lists."""
+    """Every image-space point dict in the params: hinges/centers/axis points,
+    the hinge of every extra part a camera declares (the hind legs), and any
+    per-part landmark lists. Leaving the extras out meant autoplace moved the
+    whole fly but left its legs' annuli behind, and clamping could leave a leg
+    handle off-screen where it could not be grabbed."""
     pts = [_get(params, keys) for keys in POINT_KEYS]
+    for part in parts.extra_parts(params):
+        hinge = (params['gui'].get(part) or {}).get('hinge')
+        if hinge is not None:
+            pts.append(hinge)
     for part in parts.body_parts(params):
         pts.extend(params['gui'][part].get('landmarks') or [])
     return pts

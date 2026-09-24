@@ -28,11 +28,16 @@ class CameraPipeline:
     SYNC_TIMEOUT_S = 30.0         # Lockstep: give up rather than hang forever.
 
     def __init__(self, view, source, merger=None, render=True, recorder=None,
-                 barrier=None, is_primary=False):
+                 barrier=None, is_primary=False, render_every_s=0.0):
         self.view = view
         self.source = source
         self.merger = merger
         self.render = render
+        # >0: draw the overlay at most this often. Offline analysis tracks far
+        # faster than anyone can watch, and drawing every frame would cost more
+        # than tracking it.
+        self.render_every_s = float(render_every_s)
+        self._t_render = None
         self.recorder = recorder      # Optional VideoRecorder; swap at runtime.
         self.barrier = barrier        # Lockstep with the other pipelines (files only).
         self.is_primary = is_primary  # Only the primary emits the merged row.
@@ -92,6 +97,15 @@ class CameraPipeline:
                 print('%s: reconnect failed: %s' % (self.view.name, e))
         return False
 
+    def _render_due(self):
+        if self.render_every_s <= 0:
+            return True
+        now = time.monotonic()
+        if self._t_render is None or now - self._t_render >= self.render_every_s:
+            self._t_render = now
+            return True
+        return False
+
     def _sync(self):
         """Wait for the other pipelines at a frame boundary.
 
@@ -147,7 +161,7 @@ class CameraPipeline:
                         return
                 elif state is not None and self.merger is not None:
                     self.merger.submit(state)
-                if self.render:
+                if self.render and self._render_due():
                     img = self.view.render()
                     if img is not None:
                         with self._display_lock:
