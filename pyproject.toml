@@ -19,6 +19,9 @@ dependencies = [
 # PySpin (FLIR Spinnaker) is not on PyPI: install the spinnaker_python wheel
 # from flir.com matching the rig's Python version.
 panels = ["pyserial"]
+# Kinefly2 Scope (the trace viewer) and the traces figure saved after each
+# offline analysis.
+scope = ["PySide6>=6.5", "pyqtgraph>=0.13.7"]
 
 [tool.setuptools.packages.find]
 include = ["kinefly2*"]

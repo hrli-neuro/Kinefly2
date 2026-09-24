@@ -1,7 +1,7 @@
 name: front
 camera:
   kind: video
-  path: /Users/haoruli/Desktop/260819_XHCS_XHCS_012_YAMV_cam2.mp4
+  path: /Users/haoruli/Desktop/260910_fly119_cam2.mp4
   pace: false
   loop: false
   # --- Live FLIR camera: comment out the four lines above, uncomment these.
@@ -70,24 +70,24 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 200.0
-        y: 167.0
+        x: 145.0
+        y: 190.0
       radius_outer: 67.42403132415029
       radius_inner: 27.294688127912362
       angle_hi: 0.8727
       angle_lo: -0.9564522470221135
       landmarks:
-      - x: 162.14125061035156
-        y: 149.98880004882812
-      - x: 208.32192993164062
-        y: 149.977783203125
-      - x: 210.19480895996094
-        y: 175.50592041015625
-      - x: 166.8440399169922
-        y: 170.06263732910156
-      - x: 186.82504272460938
-        y: 138.46536254882812
-      axis_deg: 77.12499844038753
+      - x: 140.1125946044922
+        y: 169.03204345703125
+      - x: 118.2280502319336
+        y: 180.29466247558594
+      - x: 160.78614807128906
+        y: 183.60162353515625
+      - x: 119.10431671142578
+        y: 204.06300354003906
+      - x: 160.58326721191406
+        y: 203.21127319335938
+      axis_deg: 91.63657704161672
     abdomen:
       track: false
       subtract_bg: false
@@ -130,4 +130,5 @@ tracker:
       radius1: 30.0
       radius2: 20.0
       angle: 0.04395472524721401
+    angles: false
   body_axis_deg: -5.10216525235819

@@ -1,7 +1,7 @@
 name: bottom
 camera:
   kind: video
-  path: /Users/haoruli/Desktop/260910_fly119_cam1.mp4
+  path: /Users/haoruli/Desktop/video_fly048_020.mov
   pace: false
   loop: false
   # --- Live FLIR camera: comment out the four lines above, uncomment these.
@@ -73,54 +73,54 @@ tracker:
       subtract_bg: false
       stabilize: false
       hinge:
-        x: 195.0
-        y: 214.0
+        x: 266.0
+        y: 176.0
       radius_outer: 32.770241272597865
       radius_inner: 14.87578304130834
       angle_hi: 1.0330055122315223
       angle_lo: -1.3670431226188864
       landmarks:
-      - x: 225.1197967529297
-        y: 215.17811584472656
-      - x: 222.0
-        y: 228.0
-      - x: 220.0944061279297
-        y: 195.60450744628906
-      - x: 211.0
-        y: 238.0
+      - x: 228.0
+        y: 154.0
+      - x: 297.0
+        y: 149.0
+      - x: 231.0
+        y: 171.0
+      - x: 303.0
+        y: 168.0
     abdomen:
       track: true
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 142.0
-        y: 212.0
-      radius_outer: 41.036569057366385
-      radius_inner: 12.0
-      angle_hi: 3.9269908169872414
-      angle_lo: 2.323053784242993
+        x: 267.0
+        y: 280.0
+      radius_outer: 134.33167906342868
+      radius_inner: 93.2148056909416
+      angle_hi: 2.016792524568787
+      angle_lo: 1.3392047030453496
     left:
       track: true
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 165.0
-        y: 187.0
-      radius_outer: 121.79490958164057
+        x: 222.0
+        y: 241.0
+      radius_outer: 154.02921800749363
       radius_inner: 80.11242100947892
-      angle_hi: -0.040589357761594336
-      angle_lo: -1.0754552357722487
+      angle_hi: -1.9216270128629638
+      angle_lo: -2.9059302955137967
     right:
       track: true
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 155.0
-        y: 238.0
-      radius_outer: 127.5617497528158
-      radius_inner: 85.42247947700886
-      angle_hi: 0.7843565202244136
-      angle_lo: -0.014225463458123588
+        x: 318.0
+        y: 242.0
+      radius_outer: 161.44968256394932
+      radius_inner: 50.93132631298737
+      angle_hi: -0.5229473579368729
+      angle_lo: -1.4940680750374788
     aux:
       track: false
       subtract_bg: false
@@ -135,23 +135,24 @@ tracker:
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 168.0
-        y: 196.0
-      radius_inner: 25.0
-      radius_outer: 55.0
-      angle_lo: 2.792526803190927
-      angle_hi: 3.7524578917878086
+        x: 220.0
+        y: 293.0
+      radius_inner: 115.55085460523432
+      radius_outer: 194.0103090044444
+      angle_lo: 1.513495432992281
+      angle_hi: 2.309415003279703
     leg_r3:
       track: true
       subtract_bg: true
       stabilize: false
       hinge:
-        x: 165.0
-        y: 238.0
-      radius_inner: 25.0
-      radius_outer: 55.0
-      angle_lo: 2.530727415391778
-      angle_hi: 3.490658503988659
+        x: 307.0
+        y: 300.0
+      radius_inner: 118.45674315968678
+      radius_outer: 180.9447429465692
+      angle_lo: 0.9270352132681294
+      angle_hi: 1.7602289408723655
+    angles: false
   body_axis_deg: 3.873756591863876
   parts:
   - leg_l3

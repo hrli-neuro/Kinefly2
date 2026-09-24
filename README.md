@@ -42,6 +42,7 @@ conda activate kinefly2
 
 # 3. Install dependencies
 pip install numpy opencv-python pyyaml pyzmq h5py
+pip install PySide6 pyqtgraph        # Kinefly2 Scope and the traces figures (section 2.4.1)
 
 # 4. Verify: run the test suite (generates a synthetic fly video and checks
 #    tracked angles against ground truth; needs no camera)
@@ -71,6 +72,11 @@ python tests/test_dual_pipeline.py    # dual-camera + ZMQ + HDF5 architecture
 ## 2. Running
 
 ### 2.1 Offline on a recorded video (setup, tuning, analysis; any OS)
+
+> **Analyzing past recordings?** Use `analyze_videos` (section 2.1.2): pick the
+> files in a window, tune on a paused or slowed-down video, and each result goes
+> to its own folder that is never overwritten, without touching the rig config.
+> `run_offline`, below, is for tuning the rig's own camera config on a video.
 
 ```bash
 python -m kinefly2.apps.run_offline config/camera_bottom.yaml --loop
@@ -155,6 +161,147 @@ Two settings matter more than they look:
 > binning and trigger are implemented but **untested on a real camera**. The
 > config plumbing is covered by tests; the rest wants a careful first run with
 > `list_cameras` and a short recording before trusting a session to it.
+
+### 2.1.2 Analyzing recorded videos (no camera needed)
+
+```bash
+python -m kinefly2.apps.analyze_videos
+```
+
+A launcher window opens:
+
+- **Add videos…** picks any number of files. The bottom and front videos of one
+  recording are recognised by name and share a row (one analysis):
+  `X_bottom`/`X_front` (what `run_rig` writes) or `X_cam1`/`X_cam2`, where cam
+  *N* is the *N*-th camera in `rig.yaml` (on this rig cam1 = bottom, cam2 =
+  front). Any other file is an analysis of its own on the primary camera.
+  **Swap cameras** fixes a wrong guess.
+- **Name of selected** renames a row. The **saves as** column shows the folder
+  the row will actually get (see below).
+- **Save results to** is the folder that receives one subfolder per analysis.
+- **Start tuning from** is the rig config, or a previous analysis folder (to
+  reuse its masks and landmarks).
+- **Also write a CSV per camera**, and the **setup playback speed**.
+
+The launcher remembers its folders and options (`~/.kinefly2/analyze.json`) and
+comes back after each batch; close it to quit.
+
+**Tuning, per analysis.** The usual camera window(s) open, with the same
+toolbar, handles, `+H`/`-H` landmarks, `autoplace`, `zero` and subtract toggles
+as on the rig. A **player** window drives every camera of the analysis at the
+same frame. It starts paused on the first frame.
+
+| key | player button | what it does |
+|---|---|---|
+| `space` | `play` / `pause` | play or pause at the chosen speed; loops at the end |
+| `[` `]` | `0.25x` `0.5x` `1x` `2x` | playback speed (1x = the video's own frame rate) |
+| `←` `→`, or `,` `.` | `-1` `+1` | step one frame (pauses) |
+| `<` `>` | `-1s` `+1s` | jump one second |
+| `Home` | `\|<`, the seek bar | back to the first frame; click or drag the bar to go anywhere |
+| `Enter` | `ANALYZE` | done tuning: analyze this video |
+| `Esc` twice | `skip` twice | skip this video; nothing is saved |
+| `q` twice | `quit` twice | stop the batch; the launcher comes back |
+
+Pause on a frame where the features are clear to place landmarks, or play at
+0.25–0.5x to watch whether masks and landmarks hold through the movement. The
+overlay is live, so a sector finding the wrong number of edges says so as you
+go. Notes about the analysis (below) appear in amber in the player window.
+
+**Analysis.** `ANALYZE` runs the video again **from frame 0 with fresh
+trackers**, as fast as the machine allows. The handles are locked meanwhile,
+the player shows progress and time left, and `Esc` twice cancels, keeping what
+was already written. Nothing from the tuning session enters the data: trackers
+carry history (the background model, autozero, the landmark prediction), and a
+tuning session is all pauses, seeks and loops. A pair is tracked in lockstep, so
+bottom frame N is always merged with front frame N. The terminal then prints a
+summary, including the fraction of frames with a finite angle for each tracked
+part; a part at 0% lost its target.
+
+Every analysis then saves a **figure of all its traces**, `<name>_traces.png`,
+and, with windows on, **opens in Kinefly2 Scope** (section 2.4.1). The first
+analysis opens the Scope; later ones arrive in it as new tabs, and the window
+stays open after `analyze_videos` ends. Both need the Scope installed
+(`pip install PySide6 pyqtgraph`); without it the analysis runs as before and
+the record notes that no figure was drawn.
+
+What is saved: one flat folder, every file labeled with the run and, where it
+belongs to one camera, the camera (`bottom`, `front`):
+
+```
+<save folder>/<name>/
+  <name>_flystate.h5                   both cameras, frame-paired: the layout of a live
+                                       recording (section 3.4)
+  <name>_bottom.csv, <name>_front.csv  one camera each: that camera's HDF5 columns without
+                                       the prefix (seq, t_camera, left_angle, head_yaw, ...),
+                                       angles in radians
+  <name>_traces.png                    every trace, as the Scope draws it
+  <name>_analysis.yaml                 the videos (path, frames, fps), primary camera, where
+                                       the tuning started from, status (complete/cancelled/
+                                       failed), frames analyzed, time taken, provenance
+  <name>_<cam>_config.yaml             regions and landmarks exactly as used; camera: points
+                                       at the video
+  <name>_<cam>_background.png          this video's median background
+  <name>_<cam>_reference.png           the frame the regions were tuned on
+  <name>_<cam>_head_templates.npz      the landmark templates, i.e. the head's zero
+```
+
+The rows of the two CSVs line up: row N of each is frame N, because the cameras
+were tracked in lockstep. The Scope, `dashboard --file` and `calibrate_fly` read
+these folders as they read live recordings.
+
+**Nothing is ever overwritten.** If `<name>` already exists in the save folder,
+the analysis goes to `<name>_001`, then `<name>_002`, and so on; the "saves as"
+column shows this before you start. The folder is claimed by creating it, which
+the operating system refuses for a name that exists, and every file inside is
+created in "fail if it exists" mode. So a second analysis under the same name,
+whether later in the same batch or from a second copy of the program started at
+the same moment, can never touch the first. Nothing is written to the save
+folder until you press `ANALYZE`: tuning happens in a private temporary folder,
+so a skipped video leaves nothing behind.
+
+**The rig config is never modified.** Each analysis tunes and keeps its own copy
+(the `_config.yaml` files). The first video starts from the rig config, or from the previous
+analysis you chose. Each later video in the batch starts from the tuning of the
+one before, so a batch from one rig or one fly needs only nudges, or `autoplace`
+when the fly sits a little differently. `autoplace` registers against the
+previous video's reference frame and cannot bridge videos of different sizes;
+the player says so when that is the case. To change the rig's own config, tune
+with `run_offline` (section 2.1) or live.
+
+Two things are deliberately **per video**:
+
+- **The background** is the median of 41 frames spread over the video itself. A
+  recording has no frame without the fly, and the abdomen cannot be measured
+  without subtraction (section 2.6). `saveBG` is not offered, because its
+  "current frame" would contain the fly.
+- **The head's zero** (the landmark templates) is never carried over from
+  another video. There it would still match well enough to report angles, but
+  relative to another fly's posture. It is cut from this video instead: on the
+  first frame shown, whenever you place or move a landmark, or with `zero`. To
+  choose it, pause on a resting posture and press `zero`.
+
+**Pairs and `calibrate_fly`.** The HDF5 of a pair holds both cameras, which is
+what the lever-arm fit needs (section 2.3.2). Check the landmarks against the
+analysis's own config rather than the rig's:
+
+```bash
+python -m kinefly2.apps.calibrate_fly <save folder>/<name> --config <save folder>/<name>/<name>_front_config.yaml
+```
+
+**From the command line** (scripts and batches; the same rules apply):
+
+```bash
+python -m kinefly2.apps.analyze_videos A_cam1.mp4 A_cam2.mp4 --out ~/Data/offline --name A
+python -m kinefly2.apps.analyze_videos ~/rec/*.avi --out ~/Data/offline --from ~/Data/offline/A --no-gui
+```
+
+- `--from DIR` starts from a previous analysis instead of the rig config (also
+  one made before the folders were flattened, with a `configs/` subfolder).
+- `--no-setup` analyzes with the starting configs as they are.
+- `--no-gui` opens no windows at all, for a batch on a setup that is already tuned.
+- `--camera NAME` sets the camera for files whose name does not say.
+- `--fps` overrides a container's frame rate.
+- `--no-csv` and `--speed` match the launcher's options.
 
 ### 2.2 Real time on the rig: leave it on, record on demand
 
@@ -342,7 +489,91 @@ positions, so a recording always says what its angles were derived from.
 Typical loop: mount fly → place landmarks → record → `calibrate_fly --write` →
 subsequent blocks report degrees.
 
-### 2.4 Browser dashboard — live, and for saved recordings
+### 2.4 Viewing traces: Kinefly2 Scope and the browser dashboard
+
+Two viewers read the same data, live or saved. **Kinefly2 Scope** (2.4.1) is
+a desktop window in the manner of Axoscope, and the one to use at the rig and
+for analyses. The **browser dashboard** (2.4.2) needs nothing installed on the
+viewing computer, so it suits a quick look at the rig from anywhere on the
+network. Both show the same channels, in degrees, against the primary camera's
+frame clock.
+
+#### 2.4.1 Kinefly2 Scope (desktop)
+
+```bash
+pip install PySide6 pyqtgraph                      # once; the rig too (Linux wheels exist)
+python -m kinefly2.apps.scope                       # empty window: File > Open, or drop files on it
+python -m kinefly2.apps.scope <run>_flystate.h5     # one tab per file
+python -m kinefly2.apps.scope --live                # this machine's run_rig (tcp://localhost:5556)
+python -m kinefly2.apps.scope --live tcp://<rig-ip>:5556   # another machine's
+python -m kinefly2.apps.run_rig config/rig.yaml --scope    # start the rig with the Scope watching it
+```
+
+**Panels.** One per channel group, stacked, all on one time axis:
+- wing stroke amplitude (L, R), L−R, L+R (hidden until chosen), abdomen, hind legs;
+- head yaw (bottom, exact) and head roll (front, exact);
+- head pitch and yaw (front): in pixels until the fly's `lever_px` is set (section 2.3.2);
+- stimulus, wingbeat frequency, landmark match quality;
+- edges per annulus and camera lag, hidden until chosen (View ▸ Channels).
+
+A group with no data hides itself: a front camera tracking only the head shows
+no wing panels, and 0 Hz from an untracked aux part is not a wingbeat. A head
+tracked by a hinge tracker (`area`, `rotation`) rather than landmarks appears
+under head yaw / roll. Any other channel in a file gets a panel of its own:
+another camera's wings, a part only this rig has, a column of a generic CSV.
+Each panel's title shows the value of every trace under the mouse, or at the
+right edge of the view.
+
+**Mouse and keys** (Help ▸ Mouse and keys):
+
+| action | what it does |
+|---|---|
+| wheel / drag inside a panel | zoom / pan **time**, every panel together |
+| Shift + wheel / drag, or wheel / drag **on a y axis** | zoom / pan that panel's **amplitude** |
+| double-click a panel · `A` | fit that panel's amplitude to what is visible · fit every panel |
+| the overview strip | the whole file or live buffer; drag the box to go anywhere, drag its edges to zoom |
+| `C` | two measurement cursors across all panels; a table gives each channel at C1 and C2, Δ, and mean/min/max between them, with Δt |
+| `Space` | live: pause (data keeps buffering; scroll back freely) / back to now |
+| ← → · + − · Home End | pan half a window · zoom time · start / end |
+| right-click | pyqtgraph's menu: view all, mouse mode, export |
+
+Amplitude ranges stay where you put them: the Scope behaves like a chart
+recorder, so a value now compares with the same value a minute ago. They are
+remembered per channel group, as are the channels shown, the recent files and
+the window.
+
+**Files.** File ▸ Open takes several at once, and Open Recent and drag-and-drop
+work too. The Scope reads:
+- the `_flystate.h5` of a live recording or an offline analysis;
+- the per-camera CSVs of an analysis, and the older combined CSV;
+- any numeric CSV, plotted against its `t`/`time` column or the row number.
+
+File ▸ Recording info shows what a file says about itself: videos, frames,
+fps, code version, conventions and `lever_px`.
+
+**Live.** File ▸ Monitor live, or `--live`, subscribes to `run_rig`'s ZMQ
+stream. It works on the rig or on any computer that can reach it, and adds no
+load to the tracker.
+- The traces sweep in from the left, then scroll; the toolbar sets the window
+  (2 s–5 min).
+- A red **REC** badge names the recording in progress, and a **STALE** badge
+  names a camera whose data stopped.
+- Stimulus onsets and recording start/stop are drawn as markers, and states/s
+  is shown.
+- If `run_rig` restarts, its frame clock starts over, and the Scope starts a
+  fresh buffer instead of drawing the new run outside the window.
+
+**Export.** File ▸ Export figure saves the panels as PNG, SVG or PDF on a white
+background. File ▸ Export cursor range as CSV saves the samples between the
+cursors (or in view) of every shown channel.
+
+**One window.** Opening files while a Scope is running hands them to that
+window as new tabs; `--new` opens a separate one. This is how every offline
+analysis opens in the same window (section 2.1.2). The saved `_traces.png` is
+drawn the same way, offscreen: `python -m kinefly2.apps.scope --figure out.png
+<file>`.
+
+#### 2.4.2 Browser dashboard — live, and for saved recordings
 
 ```bash
 python -m kinefly2.apps.dashboard                       # tracker on this machine
@@ -365,7 +596,7 @@ holds a fixed y range**, so the picture stays still and a value now is
 comparable with the same value a minute ago. Autoscaling every redraw hides
 small changes by normalising them away.
 
-#### What the time axis means
+##### What the time axis means
 
 The x-axis is the **primary camera's frame clock** (`t_camera`): `frame_id /
 fps` for a video file, the device clock for a real camera. So a 10 s window is
@@ -381,7 +612,7 @@ clock while the host clock never goes backwards.
 The axis is labelled `m:ss` from **0:00 at the start of the recording** when one
 is running, and from the oldest sample held otherwise.
 
-#### Moving around in time
+##### Moving around in time
 
 The trace **fills from the left** and grows rightwards until it reaches the
 width of the window; after that it scrolls, with `now` at the right edge.
@@ -401,7 +632,7 @@ Scrolling back covers what the page is holding — the `keep` setting, from when
 you opened it. The HDF5 remains the complete record, and `--file` is how you
 look at all of it.
 
-#### Markers
+##### Markers
 
 Vertical lines are drawn across **every** panel, so a response can be read
 against the moment that caused it without eyeballing between plots:
@@ -428,6 +659,10 @@ page empty.
 Traces are drawn with **min/max decimation** — one vertical segment per pixel
 column — so a 60 s window at 90 Hz (5400 points) draws quickly and shows the
 true envelope instead of an aliased subsample. A brief spike is never skipped.
+Zoomed in, where there are fewer samples than pixel columns, consecutive
+samples are joined directly and only a missing value breaks the line. (Until
+2026-09-24 an empty pixel column also broke it, and since zoomed in almost
+every column is empty, the traces vanished whenever you zoomed in.)
 
 Traces include wing stroke amplitude and L−R, **abdomen bending**, **both hind
 legs**, head yaw/roll/pitch, the stimulus code, wingbeat frequency and match
@@ -877,6 +1112,8 @@ its own reference.
 | `experiments/*.yaml` | Per-recording settings: data root, genotype/fly/protocol, notes, video on/off, event port (section 2.3), and **`lever_px`, the per-fly head calibration** (section 2.3.2). |
 | `kinefly2/gui/app.py` → `tracker_defaults()` | Defaults used for any tracker parameter missing from a camera YAML. |
 | `<data_root>/<date>/<name>/` | Recording folder (HDF5, videos, events, resolved settings, config snapshot). |
+| `<save folder>/<name>/` | Offline analysis of recorded videos, one flat folder: HDF5, a CSV per camera, the traces figure, `_analysis.yaml`, and each camera's exact config, background, reference and templates (section 2.1.2). |
+| `~/.kinefly2/analyze.json` | The `analyze_videos` launcher's remembered folders and options. |
 | `tests/videos/*` | Auto-generated synthetic test fixtures — regenerated by the tests, don't tune configs here. |
 
 ### 3.1 `config/rig.yaml`
@@ -1042,11 +1279,19 @@ kinefly2/camera/     FrameSource abstraction: pyspin_source, video_source, openc
 kinefly2/core/       CameraPipeline (per-camera thread), StateMerger, flystate dataclasses
 kinefly2/output/     FlystateSink interface, ZMQ publisher, HDF5 logger; future panels driver
 kinefly2/gui/        TrackerView: per-camera window, toolbar, draggable handles, YAML save
-kinefly2/apps/       run_offline, run_rig, ctl, list_cameras, calibrate_fly, check_latency, dashboard
+kinefly2/apps/       run_offline, run_rig, ctl, list_cameras, calibrate_fly, check_latency, dashboard,
+                     analyze_videos (+ its launcher window, analyze_launcher), scope
 kinefly2/version.py  code version + measurement conventions stamped into every recording
 kinefly2/client.py   Python client for experiment scripts (start/stop/event/status/states)
 kinefly2/core/session.py   recording sessions (attach/detach logger + video at runtime)
 kinefly2/gui/autoplace.py  automatic region placement (registration / silhouette)
+kinefly2/core/offline.py   offline analysis jobs: private tuning folder, output folder, lockstep run
+kinefly2/core/naming.py    never-overwrite folder names (_001, _002, ...), pairing videos by name
+kinefly2/gui/player.py     the offline player (pause, 0.25-2x, step, seek) and progress display
+kinefly2/output/csv_export.py  CSV copies of a fly-state HDF5 (per camera, or everything)
+kinefly2/scope/      Kinefly2 Scope: data.py (files, CSVs, live buffer, channel groups; no Qt,
+                     shared with the dashboard), view.py (one tab), window.py, export.py,
+                     launch.py (starting it from other programs, no Qt)
 kinefly2/analysis/   offline analysis: calibrate.py (yaw/pitch lever arm) - not in the real-time path
 config/              rig.yaml + per-camera YAMLs + saved backgrounds/references
 experiments/         per-recording settings templates
@@ -1105,6 +1350,20 @@ tests/               synthetic-video generator + ground-truth and architecture t
       near-identical if/elif blocks, verified bit-identical on a real recording.
       Abdomen measured from its silhouette margins with the holder subtracted
       (angle std 10.99 -> 1.51 deg).
+- [x] Recorded videos without a camera (2026-09-24): `analyze_videos` picks files
+      in a launcher (bottom+front pairs matched by name), tunes on a paused or
+      slowed video (0.25-2x, step, seek), then analyzes from frame 0 with fresh
+      trackers into the live HDF5 layout plus a CSV. Output folders are never
+      overwritten (`_001`, `_002`, ...), every analysis keeps the configs it
+      used, and the rig config is never touched. `autoplace` now also moves the
+      extra parts (the legs used to be left behind).
+- [x] Kinefly2 Scope (2026-09-24): a desktop trace viewer in the manner of
+      Axoscope, live from `run_rig` or for saved files (h5 and CSV):
+      time-linked panels, wheel/axis zoom, overview, two measurement cursors
+      with a readout table, markers, and PNG/SVG/PDF export. Offline analyses
+      now save one flat folder with files labeled per camera and a traces
+      figure, and open in the Scope. The browser dashboard's traces no longer
+      vanish when zoomed in.
 - [ ] Hind-leg angles: the parts and the edge-count diagnostic are in place but
       ship `track: false`. A clean single-edge sector is achievable (100% of
       frames), but the best one found correlates r = -0.36 with the real leg

@@ -1,4 +1,4 @@
-"""Offline single-camera tracking (development / analysis mode).
+"""Offline single-camera tracking (development / tuning the rig config).
 
 Runs the full tracker on a video file, synchronously in the main thread (which
 is also what macOS HighGUI requires). Use the GUI to place hinges and masks;
@@ -7,14 +7,20 @@ unchanged on the rig.
 
     python -m kinefly2.apps.run_offline config/camera_bottom.yaml
     python -m kinefly2.apps.run_offline config/camera_bottom.yaml --csv out.csv --loop
+
+To ANALYZE recorded videos -- pick files, tune on a paused or slowed video,
+results in their own never-overwritten folder, rig config untouched -- use
+kinefly2.apps.analyze_videos instead.
 """
 import argparse
 import math
+import os
 import sys
 
 import cv2
 
 from ..camera.base import make_source
+from ..camera.video_source import median_background
 from ..gui.app import TrackerView
 
 import yaml
@@ -23,32 +29,18 @@ import yaml
 def make_median_background(name, config_path, cam_cfg, n_samples=41):
     """Median of frames sampled across the whole video: anything that moves
     (wings, legs) vanishes; the static scene remains."""
-    import os
-
-    import numpy as np
-
-    cam_cfg = dict(cam_cfg, loop=False, pace=False)
-    source = make_source(cam_cfg)
-    source.open()
-    # Keep ~n_samples frames spread over the video without holding it all in
-    # memory: double the sampling stride whenever the kept set grows too big.
-    kept, stride, i = [], 1, 0
-    for frame in iter(source.read, None):
-        if i % stride == 0:
-            kept.append(frame.image)
-            if len(kept) >= 2 * n_samples:
-                kept = kept[::2]
-                stride *= 2
-        i += 1
-    source.close()
-    if not kept:
-        print('No frames in the video.')
+    if cam_cfg.get('kind', 'video') != 'video' or not cam_cfg.get('path'):
+        print('--make-bg needs a video file (camera kind: video, or --video FILE).')
         return 1
-    bg = np.median(np.stack(kept), axis=0).astype('uint8')
+    try:
+        bg, n_used, n_total = median_background(cam_cfg['path'], n_samples)
+    except IOError as e:
+        print(e)
+        return 1
     out = os.path.join(os.path.dirname(os.path.abspath(config_path)),
                        'background_%s.png' % name)
     cv2.imwrite(out, bg)
-    print('Wrote %s (median of %d of %d frames)' % (out, len(kept), i))
+    print('Wrote %s (median of %d of %d frames)' % (out, n_used, n_total))
     return 0
 
 

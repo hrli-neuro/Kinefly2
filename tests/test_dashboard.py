@@ -335,6 +335,74 @@ print(fails ? (fails+' FAILED') : 'sweep, clamping, ticks and mm:ss all pass');
 """
 
 
+JSC = '/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc'
+
+
+def _page_function(name):
+    import re
+
+    from kinefly2.apps.dashboard import PAGE
+    m = re.search(r'function\s+%s\s*\(' % re.escape(name), PAGE)
+    assert m, 'no function %s in the page' % name
+    i, depth = PAGE.index('{', m.end() - 1), 0
+    for j in range(i, len(PAGE)):
+        if PAGE[j] == '{':
+            depth += 1
+        elif PAGE[j] == '}':
+            depth -= 1
+            if depth == 0:
+                return PAGE[m.start():j + 1]
+    raise AssertionError('unbalanced braces in %s' % name)
+
+
+def test_traces_survive_zooming_in():
+    """The bug this pins: traces vanished whenever the view was zoomed in.
+    The renderer binned samples per pixel column and lifted the pen at every
+    column with no sample in it -- and zoomed in (on a 2x screen, 10 s of a
+    60 fps video is 600 samples over ~2800 columns) every sample sits between
+    empty columns, so each became a lone moveTo and nothing was stroked.
+    Runs the page's own tracePath in JavaScriptCore; skipped where absent."""
+    import subprocess
+    import tempfile
+
+    if not os.path.exists(JSC):
+        print('jsc not present; skipping the trace-path test')
+        return
+    body = r"""
+var fails=0;
+function check(ok,msg){ if(!ok){ print('FAIL '+msg); fails++; } }
+function rows(n,rate,f){ var a=[]; for(var i=0;i<n;i++) a.push({t:100+i/rate,'bottom/left':f(i)}); return a; }
+// Zoomed in: 600 samples (10 s at 60 fps) across 2800 columns.
+var sparse=rows(600,60,function(i){return Math.sin(i/20)*30+90;});
+var s=tracePath(sparse,'bottom/left',100+599/60,10,2800);
+check(s.length===1,'sparse: one unbroken line, got '+s.length+' segments');
+check(s.length&&s[0].length===600,'sparse: every sample drawn, got '+(s.length?s[0].length:0));
+// Zoomed out: 5400 samples across 600 columns, with a one-sample spike.
+var dense=rows(5400,90,function(i){return i===1234?999:Math.sin(i/7)*10;});
+var d=tracePath(dense,'bottom/left',100+5399/90,60,600);
+var top=-1e9, pts=0; d.forEach(function(g){ pts+=g.length; g.forEach(function(p){ if(p[1]>top) top=p[1]; }); });
+check(d.length===1,'dense: one line, got '+d.length);
+check(top===999,'dense: the spike survives decimation, top '+top);
+check(pts<=601*4,'dense: decimated to the columns (x=0..600), '+pts+' points');
+// A missing value (a stale camera, an uncalibrated channel) is a real gap.
+sparse[300]['bottom/left']=null;
+var g=tracePath(sparse,'bottom/left',100+599/60,10,2800);
+check(g.length===2,'a null splits the line in two, got '+g.length);
+check(g.length===2&&g[0].length+g[1].length===599,'no sample lost around the gap');
+// Samples outside the window are not drawn.
+var w=tracePath(sparse,'bottom/left',100+599/60,1,2800);
+check(w.length===1&&w[0].length===61,'window clip: 1 s holds 61 samples, got '+(w.length?w[0].length:0));
+print(fails ? (fails+' FAILED') : 'trace path: sparse, dense, gaps and clipping all pass');
+"""
+    src = '\n'.join(_page_function(n) for n in ('val', 'tracePath')) + body
+    js = os.path.join(tempfile.mkdtemp(), 'trace.js')
+    open(js, 'w').write(src)
+    out = subprocess.run([JSC, js], stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT).stdout.decode()
+    assert 'FAILED' not in out and 'Exception' not in out and 'Error' not in out, out
+    print(out.strip().splitlines()[-1])
+
+
 def test_decimation_preserves_extremes():
     """Min/max decimation is what makes a 60 s window at 90 Hz drawable. The
     property that matters is that a spike inside a pixel column survives."""
