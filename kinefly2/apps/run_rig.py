@@ -74,6 +74,8 @@ def main():
     ap.add_argument('--no-lockstep', action='store_true',
                     help='Video playback: do not hold the cameras to the same frame '
                          'index (they then drift apart at their own tracking speeds)')
+    ap.add_argument('--scope', action='store_true',
+                    help='Also open Kinefly2 Scope on the live fly state (needs PySide6, pyqtgraph)')
     g = ap.add_argument_group('experiment template (defaults for recordings)')
     g.add_argument('--exp', metavar='YAML', help='Experiment template (default: experiments/default.yaml)')
     g.add_argument('--data-root', dest='data_root')
@@ -186,6 +188,15 @@ def main():
 
     for p in pipelines.values():
         p.start()
+    if args.scope:
+        # Its own process: the Scope's Qt must not share this one with OpenCV's.
+        from ..scope import launch
+        if not rig.get('zmq_port'):
+            print('  scope:     not opened -- rig.yaml has no zmq_port to watch')
+        elif launch.open_scope(live='tcp://localhost:%d' % int(rig['zmq_port'])):
+            print('  scope:     Kinefly2 Scope watching tcp://localhost:%s' % rig['zmq_port'])
+        else:
+            print('  scope:     not installed (%s)' % launch.INSTALL_HINT)
     if args.record_now:
         session.start(fly_id=args.fly_id, protocol=args.protocol, notes=args.notes)
 
