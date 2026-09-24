@@ -45,38 +45,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from ..scope.data import PARTS, axis_time, clean, load_recording, row_from_state  # noqa: F401
+
 MAX_HISTORY_S = 300.0       # server buffer: one recording's worth (experiments run < 3 min)
 MAX_ROWS = 120000           # hard cap, so a reset frame clock cannot grow the buffer forever
-PARTS = ('left', 'right', 'head', 'abdomen')   # drawn first; extras follow in order
-
-
-def clean(x):
-    """JSON has no NaN or Infinity. Python's json emits bare `NaN`, which
-    JSON.parse rejects outright -- one uncalibrated channel would kill the
-    whole stream -- so non-finite values become null and are drawn as gaps."""
-    if isinstance(x, float) and not math.isfinite(x):
-        return None
-    if isinstance(x, dict):
-        return {k: clean(v) for k, v in x.items()}
-    if isinstance(x, (list, tuple)):
-        return [clean(v) for v in x]
-    return x
-
-
-def axis_time(state):
-    """The display timestamp for one published state.
-
-    The primary camera's frame clock, which is the only clock that means the
-    same thing live and in replay. A publisher that does not say which camera
-    is primary (an older run_rig) falls back to the host clock, which is what
-    this used to do for everything."""
-    primary = state.get('primary')
-    cams = state.get('cameras') or {}
-    cs = cams.get(primary) if primary else None
-    tc = (cs or {}).get('t_camera')
-    if isinstance(tc, (int, float)) and math.isfinite(tc):
-        return float(tc)
-    return float(state['t_host'])
 
 
 class StateBuffer:
@@ -92,54 +64,9 @@ class StateBuffer:
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
-    @staticmethod
-    def row_from_state(state):
-        """Flatten one published state into the channels the page plots."""
-        row = {'t': axis_time(state), 't_host': float(state['t_host']),
-               'seq': state['seq'], 'stim': state.get('stim'),
-               'rec': state.get('rec')}
-        # How old each camera's contribution was at the merge, in ms, and which
-        # cameras were too old to trust. A stale camera's measurements arrive
-        # here already blanked, so this is what says the gap is a stalled
-        # camera rather than a fly that stopped moving.
-        ages = state.get('ages') or {}
-        limit = state.get('stale_after_s')
-        stale = [c for c, a in sorted(ages.items())
-                 if a is not None and limit is not None and a > limit]
-        row['stale'] = ','.join(stale) if stale else None
-        for cam, age in ages.items():
-            row['%s/lag_ms' % cam] = None if age is None else age * 1e3
-        for cam, cs in (state.get('cameras') or {}).items():
-            parts = cs.get('parts') or {}
-            # Whatever the camera actually tracks, not a fixed list: a ventral
-            # camera may declare extra parts (hind legs) that a frontal one
-            # does not.
-            names = list(PARTS) + [p for p in parts if p not in PARTS and p != 'aux']
-            for part in names:
-                ps = parts.get(part) or {}
-                a = (ps.get('angles') or [None])[0]
-                row['%s/%s' % (cam, part)] = None if a is None else math.degrees(a)
-                # Edge trackers report how many edges their annulus found. It is
-                # the check that says whether an angle is trustworthy at all.
-                # Emitted for every part, null where the tracker has no such
-                # notion, so a live row and a row read back from a file carry
-                # exactly the same keys.
-                row['%s/%s_n_edges' % (cam, part)] = (ps.get('extra') or {}).get('n_edges')
-            head = parts.get('head') or {}
-            extra = head.get('extra') or {}
-            # The anatomical channels, named by the tracker itself. Exactly one
-            # is the exact in-plane angle; a frontal camera fills the other two
-            # once its lever arm is calibrated, a ventral one never does.
-            for name in ('roll', 'pitch', 'yaw'):
-                v = extra.get(name)
-                row['%s/head_%s' % (cam, name)] = None if v is None else math.degrees(v)
-            # Uncalibrated fallbacks, in pixels.
-            for name in ('d_axial', 'd_lateral'):
-                row['%s/head_%s' % (cam, name)] = extra.get(name)
-            row['%s/head_q' % cam] = head.get('intensity')
-            aux = parts.get('aux') or {}
-            row['%s/wbf' % cam] = aux.get('freq')
-        return clean(row)
+    # Flattening a published state is shared with the Scope (scope/data.py);
+    # kept reachable here, where the tests and older scripts look for it.
+    row_from_state = staticmethod(row_from_state)
 
     def _run(self):
         import zmq
@@ -194,134 +121,34 @@ def rows_from_h5(path):
 
     One data model is the whole point: the page cannot tell a file from a live
     stream, so scrolling, markers, the minimap and the cursor need no second
-    implementation. Two column names differ between the two -- `head_q` is
-    stored as `head_score`, `wbf` as `aux_freq` -- and angles are radians on
-    disk but degrees on the page.
-    """
-    import numpy as np
-
-    from ..analysis import calibrate
-
-    log = calibrate.load_log(path)
-    attrs = log.get('attrs') or {}
-    rig = attrs.get('rig') or {}
-    cams = list(log.get('cameras') or [])
-    primary = rig.get('primary')
-    primary_known = primary in cams
-    if not primary_known:
-        # Written before the `rig` attribute existed. Guessing the primary is
-        # usually right on a two-camera rig, but it IS a guess, and it decides
-        # whose frame clock the x-axis is -- so say so rather than imply the
-        # file stated it.
-        primary = cams[0] if cams else None
-    stale_after_s = rig.get('stale_after_s')
-
-    t_host = np.asarray(log.get('merged/t_host', []), dtype=float)
-    n = int(t_host.size)
+    implementation. The reading itself (channel names, degrees, the display
+    axis, stale rows, events) is scope/data.py's, shared with the Scope."""
+    rec = load_recording(path)
+    n = len(rec.t)
     if n == 0:
         raise SystemExit('%s has no rows -- was the recording stopped before any '
                          'frames arrived?' % path)
 
-    # The display axis, same rule as live: the primary camera's frame clock.
-    # A file written before the `rig` attribute existed has no primary, and a
-    # camera can be missing from individual rows, so fall back where needed.
-    axis = None
-    if primary is not None:
-        tc = np.asarray(log.get('%s/t_camera' % primary, []), dtype=float)
-        if tc.size == n:
-            ok = np.isfinite(tc)
-            if ok.sum() >= 2:
-                idx = np.arange(n)
-                axis = np.interp(idx, idx[ok], tc[ok]) if not ok.all() else tc
-    if axis is None:
-        axis = t_host
-
     def tolist(a):
         return [None if v != v else v for v in a.tolist()]
 
-    channels = {}
-
-    def put(key, name, scale=None):
-        a = log.get(name)
-        if a is None:
-            return
-        a = np.asarray(a, dtype=float)
-        if a.size != n:
-            return
-        if scale == 'deg':
-            a = np.degrees(a)
-        elif scale is not None:
-            a = a * scale
-        channels[key] = tolist(a)
-
-    put('stim', 'merged/stim')
-    for cam in cams:
-        # Column names in the file are the authority on what this camera tracked.
-        extra = sorted({k.split('/')[1][:-6] for k in log
-                        if k.startswith(cam + '/') and k.endswith('_angle')} - set(PARTS))
-        for part in list(PARTS) + extra:
-            put('%s/%s' % (cam, part), '%s/%s_angle' % (cam, part), 'deg')
-            put('%s/%s_n_edges' % (cam, part), '%s/%s_n_edges' % (cam, part))
-        for name in ('roll', 'pitch', 'yaw'):
-            put('%s/head_%s' % (cam, name), '%s/head_%s' % (cam, name), 'deg')
-        for name in ('d_axial', 'd_lateral'):
-            put('%s/head_%s' % (cam, name), '%s/head_%s' % (cam, name))
-        put('%s/head_q' % cam, '%s/head_score' % cam)
-        put('%s/wbf' % cam, '%s/aux_freq' % cam)
-        put('%s/lag_ms' % cam, '%s/age' % cam, 1e3)
-
-    # Which cameras were blanked as stale on each row. The threshold is not
-    # recoverable from the columns alone, which is why it is stamped in `rig`.
-    stale = [None] * n
-    if stale_after_s:
-        flags = {}
-        for cam in cams:
-            a = log.get('%s/age' % cam)
-            if a is None:
-                continue
-            a = np.asarray(a, dtype=float)
-            if a.size == n:
-                flags[cam] = (np.isfinite(a) & (a > stale_after_s)).tolist()
-        if flags:
-            for i in range(n):
-                hit = [c for c in cams if flags.get(c) and flags[c][i]]
-                if hit:
-                    stale[i] = ','.join(hit)
-
-    name = os.path.basename(path)
-    for suffix in ('_flystate.h5', '.h5'):
-        if name.endswith(suffix):
-            name = name[:-len(suffix)]
-            break
-
-    seq = log.get('merged/seq')
-    seq = np.asarray(seq, dtype=float).tolist() if seq is not None else [0.0] * n
-    axis_l, host_l = axis.tolist(), t_host.tolist()
+    channels = {k: tolist(v) for k, v in rec.columns.items()}
+    axis_l, host_l, seq_l = rec.t.tolist(), rec.t_host.tolist(), rec.seq.tolist()
     rows = []
     for i in range(n):
-        row = {'t': axis_l[i], 't_host': host_l[i], 'seq': int(seq[i]),
-               'stale': stale[i], 'rec': name}
+        row = {'t': axis_l[i], 't_host': host_l[i], 'seq': int(seq_l[i]),
+               'stale': rec.stale[i], 'rec': rec.name}
         for key, vals in channels.items():
             row[key] = vals[i]
         rows.append(row)
-
-    # Events are logged but never published, so they are markers in file mode
-    # only. They are stamped on the host clock, so map them onto the display
-    # axis through the rows themselves.
-    ev_t = np.asarray(log.get('events/t_host', []), dtype=float)
-    ev_x = list(log.get('events/text', []))
-    events = []
-    if ev_t.size and n > 1:
-        mapped = np.interp(ev_t, t_host, axis)
-        events = [{'t': float(a), 'text': str(x)} for a, x in zip(mapped, ev_x)]
-
-    info = {'mode': 'file', 'name': name, 'primary': primary,
-            'primary_known': primary_known, 'cameras': cams,
-            'stale_after_s': stale_after_s, 'events': events, 'n': n,
+    i = rec.info
+    info = {'mode': 'file', 'name': rec.name, 'primary': i['primary'],
+            'primary_known': i['primary_known'], 'cameras': i['cameras'],
+            'stale_after_s': i['stale_after_s'], 'events': rec.events, 'n': n,
             'span': float(axis_l[-1] - axis_l[0]),
-            'code_version': attrs.get('code_version'),
-            'conventions': attrs.get('conventions'),
-            'lever_px': attrs.get('lever_px')}
+            'code_version': i.get('code_version'),
+            'conventions': i.get('conventions'),
+            'lever_px': i.get('lever_px')}
     return clean(rows), clean(info)
 
 
@@ -502,6 +329,42 @@ function activeKey(kk){
   return {k:kk.k,unit:null};
 }
 
+// ---- traces ----------------------------------------------------------------
+// The polyline(s) one trace draws in one panel, as segments of [x, value]
+// points. Consecutive samples are ALWAYS joined: zoomed in, most pixel columns
+// hold no sample at all, and lifting the pen at every such column is what made
+// every trace vanish on zooming in. Only a missing value breaks the line. With
+// more samples than columns, a column keeps its first, lowest, highest and last
+// value, so the envelope -- and a one-sample spike -- survives decimation.
+function tracePath(rows,key,R,win,W){
+  const segs=[]; let seg=null, col=null;
+  function flush(){
+    if(!col)return;
+    seg.push([col.x,col.first]);
+    if(col.n>1){
+      if(col.iLo<col.iHi) seg.push([col.x,col.lo],[col.x,col.hi]);
+      else seg.push([col.x,col.hi],[col.x,col.lo]);
+      seg.push([col.x,col.last]);
+    }
+    col=null;
+  }
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i], dt=R-r.t; if(dt<0||dt>win)continue;
+    const v=val(r,key);
+    if(v==null||!isFinite(v)){ flush(); seg=null; continue; }
+    const x=W*(1-dt/win), xc=Math.floor(x);
+    if(!seg){ seg=[]; segs.push(seg); }
+    if(col&&col.xc===xc){
+      col.n++; if(v<col.lo){col.lo=v;col.iLo=col.n;} if(v>col.hi){col.hi=v;col.iHi=col.n;}
+      col.last=v; continue;
+    }
+    flush();
+    col={xc:xc,x:x,first:v,lo:v,hi:v,last:v,n:1,iLo:1,iHi:1};
+  }
+  flush();
+  return segs;
+}
+
 // ---- time formatting -------------------------------------------------------
 const TICKS=[0.1,0.2,0.5,1,2,5,10,15,30,60,120,300,600];
 function tickStep(win){ for(const s of TICKS) if(win/s<=8) return s; return 900; }
@@ -516,6 +379,12 @@ function mmss(sec){
 // ---- rows in ---------------------------------------------------------------
 function addRows(rows){
   for(const r of rows){
+    // run_rig restarted: its frame clock begins again near zero. Kept, the old
+    // run would hold the window where the new samples are not, and nothing
+    // would draw -- so start afresh.
+    if(mode==='live'&&data.length&&r.t<data[data.length-1].t-1){
+      data.length=0; marks=[]; recT0=null;
+    }
     const prev=data.length?data[data.length-1]:null;
     if(prev){
       // `stim` is HELD between changes, so a change between consecutive rows
@@ -569,7 +438,7 @@ function build(){
     btns[5].onclick=()=>{p.show=false;save();build();};
     const lo=d.querySelector('.lo'), hi=d.querySelector('.hi');
     for(const [el,f] of [[lo,'lo'],[hi,'hi']])
-      el.onchange=()=>{const v=parseFloat(el.value); if(isFinite(v)){p[f]=v;save();}};
+      el.onchange=()=>{const v=parseFloat(el.value); if(isFinite(v)){p[f]=v;save();draw();}};
     const nm=d.querySelector('.name');
     nm.ondragstart=e=>{e.dataTransfer.setData('text/plain',p.id);d.classList.add('drag');};
     nm.ondragend=()=>d.classList.remove('drag');
@@ -606,7 +475,7 @@ function wireTime(cv){
 }
 function zoom(p,f){const c=(p.lo+p.hi)/2,h=(p.hi-p.lo)/2*f;p.lo=c-h;p.hi=c+h;sync(p);}
 function pan(p,f){const s=(p.hi-p.lo)*f;p.lo+=s;p.hi+=s;sync(p);}
-function sync(p){ if(!p.el)return; p.el.querySelector('.lo').value=p.lo.toFixed(2); p.el.querySelector('.hi').value=p.hi.toFixed(2); }
+function sync(p){ if(!p.el)return; p.el.querySelector('.lo').value=p.lo.toFixed(2); p.el.querySelector('.hi').value=p.hi.toFixed(2); draw(); }
 function autofit(p){
   const spec=specOf(p.id); let lo=Infinity,hi=-Infinity; const R=rightEdge();
   for(const kk of spec.keys){ const key=activeKey(kk).k;
@@ -653,22 +522,17 @@ function draw(){
     let unitShown=spec.unit;
     spec.keys.forEach(kk=>{
       const act=activeKey(kk); if(act.unit)unitShown=act.unit;
-      // Min/max decimation: one vertical segment per pixel column. A 60 s
-      // window at 90 Hz is 5400 points; drawing them all both aliases and drags.
-      const cols=new Array(Math.ceil(W)).fill(null);
-      for(const r of data){
-        const dt=R-r.t; if(dt<0||dt>view.win)continue;
-        const v=val(r,act.k); if(v==null||!isFinite(v))continue;
-        const x=Math.floor(X(r.t)); if(x<0||x>=cols.length)continue;
-        const c=cols[x]; if(c==null)cols[x]={lo:v,hi:v,last:v}; else {c.lo=Math.min(c.lo,v);c.hi=Math.max(c.hi,v);c.last=v;}
-      }
+      // Min/max decimation where samples outnumber pixel columns (a 60 s window
+      // at 90 Hz is 5400 points), a plain polyline where they do not.
+      const segs=tracePath(data,act.k,R,view.win,W);
       g.strokeStyle=kk.c; g.lineWidth=1.4*devicePixelRatio; g.beginPath();
-      let pen=false, prev=null;
-      for(let x=0;x<cols.length;x++){
-        const c=cols[x]; if(c==null){pen=false;continue;}
-        if(spec.step&&pen&&prev!=null){ g.lineTo(x,Y(prev)); }  // hold: square edges, never across a gap
-        if(!pen){g.moveTo(x,Y(c.last));pen=true;} else {g.lineTo(x,Y(c.hi)); if(c.hi!==c.lo)g.lineTo(x,Y(c.lo)); g.lineTo(x,Y(c.last));}
-        prev=c.last;
+      for(const sg of segs){
+        g.moveTo(sg[0][0],Y(sg[0][1]));
+        if(sg.length===1){ g.lineTo(sg[0][0]+devicePixelRatio,Y(sg[0][1])); continue; }  // a lone sample: a dot
+        for(let j=1;j<sg.length;j++){
+          if(spec.step) g.lineTo(sg[j][0],Y(sg[j-1][1]));   // hold the value until it changes
+          g.lineTo(sg[j][0],Y(sg[j][1]));
+        }
       }
       g.stroke();
     });
@@ -804,6 +668,7 @@ function startStream(){
   es.onerror=()=>{document.getElementById('status').textContent='disconnected';};
 }
 build(); setInterval(()=>{if(view.follow)draw();},50);
+window.addEventListener('resize',()=>draw());
 </script></body></html>
 """
 
