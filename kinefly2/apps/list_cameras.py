@@ -96,6 +96,11 @@ def config_block(info, fps=90.0):
             exposure, int(1e6 / fps), fps),
         '  gain_db: %g' % (info.get('gain_db') or 0),
     ]
+    fps_max = info.get('fps_max')
+    if fps_max and fps_max < 0.99 * fps:
+        lines.insert(4, '  # reaches only %.1f fps at its current crop: set a smaller roi to go'
+                        ' faster,\n  # or Kinefly2 runs at whatever maximum the camera reports'
+                        % fps_max)
     w, h = info.get('width_max'), info.get('height_max')
     if w and h:
         lines += [

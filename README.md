@@ -5,6 +5,12 @@ wing stroke amplitude (WSA), head yaw/roll, abdomen angle, and an auxiliary
 intensity/wingbeat-frequency region, from one or two cameras at ~90 Hz, for
 closed-loop experiments.
 
+> **Short guides (PDF):** [Getting Started](docs/Kinefly2_Getting_Started.pdf)
+> for new users (install, hardware, first setup, recording; written for a
+> bottom-camera-only rig) and the two-page
+> [Daily Checklist](docs/Kinefly2_Daily_Checklist.pdf). Rebuild them from
+> `docs/src/` with `bash docs/src/build_pdfs.sh`.
+
 The image-processing core is ported from
 [Kinefly](https://github.com/ssafarik/Kinefly) (Safarik, Dickinson Lab) via
 [Benifly](https://github.com/bmslpsu/Benifly) (Cellini). The ROS layer is
@@ -156,6 +162,18 @@ Two settings matter more than they look:
   achieved came from two views that *were* frame-synchronised. Wire the
   primary's strobe line to the secondary's trigger input per FLIR's GPIO
   pinout for your model.
+
+**If the camera cannot reach `fps`.** 90 Hz is not required.
+- **How the rate is set.** `fps` is a request. Kinefly2 caps it at the
+  camera's maximum for the current crop, binning and exposure, then uses the
+  rate the camera reports it will actually deliver.
+- **Where that rate appears.** It is what the startup banner shows
+  (`rate: bottom 72.3 fps (asked 90)`), what is written into the recorded
+  AVI's header and the HDF5 `rig` attribute, and what the staleness threshold
+  is derived from. A warning names the likely cause: the crop is too large
+  for the link, or `exposure_us` is longer than a frame.
+- **What doesn't change.** Nothing else needs adjusting. The trackers use
+  each frame's own timestamp, so they work at any rate.
 
 > The camera code paths cannot be exercised without the hardware, so ROI,
 > binning and trigger are implemented but **untested on a real camera**. The
@@ -1043,7 +1061,7 @@ L = R. Names pair by their `_l`/`_r` side suffix.
 python -m kinefly2.apps.check_latency config/camera_bottom.yaml --seconds 30
 ```
 
-Healthy rig numbers at 90 Hz: interval median ≈ 11.1 ms, dropped frames = 0,
+Healthy rig numbers at 90 Hz (the interval is 1000/fps ms at other rates): interval median ≈ 11.1 ms, dropped frames = 0,
 track median in the low milliseconds.
 
 ### 2.8 GUI controls (same UX as Kinefly)
@@ -1220,7 +1238,7 @@ Times are seconds (host clock is monotonic; `t_camera` is the device clock;
 `/events/text`. Readable with h5py or MATLAB's `h5read`.
 
 **File attributes — what produced the numbers.** Every recording carries `rig`
-(the primary camera, the camera list and `stale_after_s` — what a reader needs
+(the primary camera, the camera list, each camera's delivered `fps` and `stale_after_s` — what a reader needs
 to rebuild the recording's own time base), `code_version` (a `git describe` of the checkout, `-dirty` when it had
 uncommitted changes), `kinefly2_version`, `python`, `host`, and `conventions`:
 the measurement conventions in force, currently

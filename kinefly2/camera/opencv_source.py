@@ -12,6 +12,7 @@ class OpenCVSource(FrameSource):
 
     def __init__(self, index=0, fps=None):
         self.index = index
+        self.fps_requested = fps
         self.fps = fps
         self.cap = None
         self.frame_id = 0
@@ -20,8 +21,11 @@ class OpenCVSource(FrameSource):
         self.cap = cv2.VideoCapture(self.index)
         if not self.cap.isOpened():
             raise IOError('Cannot open camera index %r' % self.index)
-        if self.fps:
-            self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+        if self.fps_requested:
+            self.cap.set(cv2.CAP_PROP_FPS, self.fps_requested)
+        # What the driver says it will deliver; many webcams report 0, so keep
+        # the request then.
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or self.fps_requested
         # Keep the driver-side buffer minimal so frames are fresh.
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 

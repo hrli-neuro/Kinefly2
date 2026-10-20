@@ -172,6 +172,22 @@ def main():
     if is_dirty():
         print('             (uncommitted changes -- recordings are stamped "-dirty",')
         print('              so this exact code cannot be checked out again)')
+    # The rate each source actually delivers: a live camera reports it after
+    # open(), and that -- not the config's request -- is what the videos and
+    # the staleness threshold use.
+    rates = []
+    for name, src in sources.items():
+        fps, asked = getattr(src, 'fps', None), getattr(src, 'fps_requested', None)
+        line = '%s %s' % (name, '%.1f fps' % fps if fps else 'rate unknown')
+        if fps and asked and abs(fps - asked) > 0.01 * asked:
+            line += ' (asked %g)' % asked
+        rates.append(line)
+    print('  rate:      %s' % ', '.join(rates))
+    live = [src.fps for src in sources.values()
+            if getattr(src, 'reconnectable', False) and getattr(src, 'fps', None)]
+    if len(live) > 1 and max(live) > 1.01 * min(live):
+        print('             cameras differ in rate: each row pairs a primary frame with the '
+              'newest frame of the other (README 2.3.1)')
     print('  stale:     blank a camera older than %.0f ms' % (stale_after_s * 1e3))
     if lockstep:
         print('  lockstep:  on (video replay; %s frame N pairs with %s frame N)'

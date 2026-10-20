@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kinefly2 Getting Started</title>
+<link rel="stylesheet" href="guide.css">
+<style>@page { @bottom-left { content: "Kinefly2: Getting Started"; } }</style>
+</head>
+<body>
+
+<header class="doc-head">
+  <h1>Kinefly2: Getting Started</h1>
+  <p class="sub">Install, set up and record with Kinefly2. This guide is written for a rig with only the bottom camera.</p>
+  <p class="meta">For new users. Code version 9ccc802, October 2026. The full reference is <code>README.md</code> in the repository; section numbers like <span class="ref">(README §2.2)</span> point there.</p>
+</header>
+
+<!-- ================================================================== 1 -->
+<h2><span class="num">1</span>What Kinefly2 does</h2>
+
+<p>Kinefly2 tracks a tethered fly's wings, head and abdomen in camera images, in real time, at about 90 frames per second. It is a Python 3 version of the Dickinson-lab <i>Kinefly</i> and does not need ROS. Leave it running all day. Your experiment script tells it when to save a recording and which stimulus is on.</p>
+
+<figure>
+<svg viewBox="0 0 720 205" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0f5e6e"/>
+    </marker>
+  </defs>
+  <!-- cameras -->
+  <rect x="8" y="22" width="160" height="52" rx="6" fill="#e6f1f3" stroke="#0f5e6e" stroke-width="1.6"/>
+  <text x="88" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="#0f5e6e">Bottom camera</text>
+  <text x="88" y="62" text-anchor="middle" font-size="11.5" fill="#33414a">FLIR USB3, ~90 Hz</text>
+  <rect x="8" y="92" width="160" height="42" rx="6" fill="#fff" stroke="#8a959c" stroke-width="1.3" stroke-dasharray="5 4"/>
+  <text x="88" y="111" text-anchor="middle" font-size="12.5" fill="#5b6770">Front camera</text>
+  <text x="88" y="126" text-anchor="middle" font-size="10.5" fill="#8a959c">(optional, section 8)</text>
+  <!-- run_rig -->
+  <rect x="250" y="22" width="210" height="112" rx="7" fill="#0f5e6e"/>
+  <text x="355" y="47" text-anchor="middle" font-size="14.5" font-weight="700" fill="#fff">run_rig  (always on)</text>
+  <text x="355" y="70" text-anchor="middle" font-size="11.5" fill="#e6f1f3">tracks every frame</text>
+  <text x="355" y="88" text-anchor="middle" font-size="11.5" fill="#e6f1f3">one live window per camera</text>
+  <text x="355" y="106" text-anchor="middle" font-size="11.5" fill="#e6f1f3">saves nothing until a</text>
+  <text x="355" y="122" text-anchor="middle" font-size="11.5" fill="#e6f1f3">recording is started</text>
+  <!-- outputs -->
+  <rect x="540" y="14" width="172" height="56" rx="6" fill="#e6f1f3" stroke="#0f5e6e" stroke-width="1.4"/>
+  <text x="626" y="36" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0f5e6e">Live stream (port 5556)</text>
+  <text x="626" y="54" text-anchor="middle" font-size="10.5" fill="#33414a">Scope, dashboard, your code</text>
+  <rect x="540" y="86" width="172" height="56" rx="6" fill="#e6f1f3" stroke="#0f5e6e" stroke-width="1.4"/>
+  <text x="626" y="108" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0f5e6e">Recording folder</text>
+  <text x="626" y="126" text-anchor="middle" font-size="10.5" fill="#33414a">angles (HDF5), video, events</text>
+  <!-- script -->
+  <rect x="250" y="166" width="210" height="34" rx="6" fill="#fff" stroke="#0f5e6e" stroke-width="1.4"/>
+  <text x="355" y="188" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0f5e6e">Your experiment script</text>
+  <!-- arrows -->
+  <line x1="168" y1="48" x2="248" y2="48" stroke="#0f5e6e" stroke-width="1.8" marker-end="url(#ah)"/>
+  <line x1="168" y1="113" x2="248" y2="113" stroke="#8a959c" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah)"/>
+  <line x1="460" y1="50" x2="538" y2="42" stroke="#0f5e6e" stroke-width="1.8" marker-end="url(#ah)"/>
+  <line x1="460" y1="108" x2="538" y2="114" stroke="#0f5e6e" stroke-width="1.8" marker-end="url(#ah)"/>
+  <line x1="355" y1="166" x2="355" y2="137" stroke="#0f5e6e" stroke-width="1.8" marker-end="url(#ah)"/>
+  <text x="365" y="157" font-size="10.5" fill="#33414a">start · stop · stim · event   (port 5558)</text>
+</svg>
+<figcaption>Cameras feed <code>run_rig</code>, which tracks continuously and publishes a live stream. A recording, with files on disk, exists only between a script's <i>start</i> and <i>stop</i>.</figcaption>
+</figure>
+
+<table class="tight">
+  <tr><th>Measurement</th><th>Bottom camera only</th><th>With front camera</th><th>Column in the recording</th></tr>
+  <tr><td>Left / right wing stroke amplitude</td><td class="yes">yes</td><td>yes</td><td><code>bottom/left_angle</code>, <code>right_angle</code></td></tr>
+  <tr><td>L−R (steering), L+R</td><td class="yes">yes</td><td>yes</td><td>computed from the two wings</td></tr>
+  <tr><td>Head yaw</td><td class="yes">yes (exact)</td><td>yes</td><td><code>bottom/head_yaw</code></td></tr>
+  <tr><td>Abdomen bending</td><td class="yes">yes</td><td>yes</td><td><code>bottom/abdomen_angle</code></td></tr>
+  <tr><td>Head roll</td><td class="no">no</td><td>yes (exact)</td><td><code>front/head_roll</code></td></tr>
+  <tr><td>Head pitch</td><td class="no">no</td><td>yes, after a per-fly calibration</td><td><code>front/head_pitch</code></td></tr>
+  <tr><td>Hind legs</td><td>experimental</td><td>experimental</td><td><code>bottom/leg_l3_angle</code>, <code>leg_r3_angle</code></td></tr>
+</table>
+
+<div class="note"><p><b>A rig with only the bottom camera is a complete setup.</b> Everything in sections 2–7 works with one camera. Section 8 lists what changes if you add a front camera later.</p></div>
+
+<!-- ================================================================== 2 -->
+<h2><span class="num">2</span>What you need</h2>
+
+<table>
+  <tr><th style="width:19%">Item</th><th style="width:45%">Requirement</th><th>Notes</th></tr>
+  <tr><td><b>Rig computer</b></td><td>Linux (Ubuntu) PC with USB3 ports, and a local disk with room for video (about 2–4 GB per camera per hour).</td><td>The FLIR camera driver runs here. A Mac can tune configs and analyze recorded videos, but cannot run live cameras.</td></tr>
+  <tr><td><b>Bottom camera</b></td><td>A monochrome FLIR (Teledyne) USB3 machine-vision camera supported by the Spinnaker SDK, ideally able to reach <b>90 fps</b> at your cropped image size. A slower camera also works (section 4).</td><td>Kinefly2 identifies the camera by its serial number, so the USB port it is plugged into doesn't matter.</td></tr>
+  <tr><td><b>Lens</b></td><td>Frames the whole fly, including the full wing stroke, inside the crop (e.g. 512 × 512 px).</td><td>A smaller crop allows a higher frame rate.</td></tr>
+  <tr><td><b>Illumination</b></td><td>An IR backlight <b>on the opposite side of the fly from the camera</b>, so the camera sees a dark fly on a bright field.</td><td>The bottom-view trackers expect this silhouette (<code>invertcolor: true</code>).</td></tr>
+  <tr><td><b>Fly holder</b></td><td>Your usual tether, held still relative to the camera.</td><td>Backgrounds and region positions assume the holder doesn't move.</td></tr>
+  <tr><td class="muted">Optional</td><td class="muted">A second FLIR camera in front of the fly, plus a GPIO cable between the two cameras.</td><td class="muted">For head roll and pitch (section 8).</td></tr>
+</table>
+
+<!-- ================================================================== 3 -->
+<h2><span class="num">3</span>Install <span class="ref">(README §1)</span></h2>
+
+<h3>On any computer (rig, or a Mac for analysis)</h3>
+<pre><span class="p">$</span> git clone https://github.com/hrli-neuro/Kinefly2.git
+<span class="p">$</span> cd Kinefly2
+<span class="p">$</span> conda create -n kinefly2 python=3.10        <span class="c"># 3.10: FLIR's PySpin wheels support only some versions</span>
+<span class="p">$</span> conda activate kinefly2
+<span class="p">$</span> pip install numpy opencv-python pyyaml pyzmq h5py
+<span class="p">$</span> pip install PySide6 pyqtgraph                <span class="c"># Kinefly2 Scope (trace viewer)</span>
+<span class="p">$</span> python tests/test_tracking.py                <span class="c"># expects wings r=1.000, head r~0.99; no camera needed</span>
+<span class="p">$</span> python tests/test_dual_pipeline.py</pre>
+
+<h3>On the rig only: the FLIR driver</h3>
+<ol>
+  <li>From flir.com → Spinnaker SDK, download the <b>Spinnaker SDK</b> .deb bundle for your Ubuntu version and the <b>spinnaker_python</b> (PySpin) wheel for <b>Python 3.10</b>.</li>
+  <li>Install the SDK following FLIR's README, including the udev rules. Then:
+<pre><span class="p">$</span> conda activate kinefly2
+<span class="p">$</span> pip install spinnaker_python-*.whl
+<span class="p">$</span> python -c "import PySpin; print('PySpin OK')"</pre></li>
+  <li>USB3 cameras need a larger kernel USB buffer. Run this <b>after every reboot</b>, or make it permanent through the kernel command line as FLIR's install notes describe:
+<pre><span class="p">$</span> sudo sh -c 'echo 1000 &gt; /sys/module/usbcore/parameters/usbfs_memory_mb'</pre></li>
+</ol>
+
+<!-- ================================================================== 4 -->
+<h2><span class="num">4</span>Connect the bottom camera <span class="ref">(README §2.1.1)</span></h2>
+
+<ol>
+  <li><b>Find the camera.</b> The command below prints the camera's serial number, model, link speed, resolution and maximum fps at the current crop, followed by a ready-to-paste <code>camera:</code> block.
+<pre><span class="p">$</span> python -m kinefly2.apps.list_cameras</pre></li>
+  <li><b>Paste the block</b> into <code>config/camera_bottom.yaml</code>, in place of the four <code>kind: video</code> lines at the top. With one camera, leave out the <code>trigger:</code> line.
+<pre>camera:
+  kind: pyspin
+  serial: "22334455"              <span class="c"># from list_cameras: binds THIS camera to 'bottom'</span>
+  fps: 90
+  exposure_us: 2000               <span class="c"># set manually; must be shorter than 1/fps (11111 us at 90 Hz)</span>
+  gain_db: 0
+  roi: {width: 512, height: 512}  <span class="c"># crop to reach 90 fps (centred by default)</span></pre></li>
+  <li><b>Tell the rig there is only one camera.</b> In <code>config/rig.yaml</code>, switch the front camera off. Alternatively, add <code>--cameras bottom</code> to every <code>run_rig</code> command.
+<pre>cameras:
+  bottom: camera_bottom.yaml
+  front:
+    config: camera_front.yaml
+    enabled: false                <span class="c"># bottom-only rig</span>
+primary: bottom</pre></li>
+  <li><b>Check the timing.</b> A healthy result is an interval median of ≈ 1000/fps ms (11.1 ms at 90 Hz), 0 dropped frames, and a track median of a few milliseconds.
+<pre><span class="p">$</span> python -m kinefly2.apps.check_latency config/camera_bottom.yaml --seconds 30</pre></li>
+</ol>
+
+<ul>
+  <li><b>Exposure must be manual.</b> Auto-exposure changes brightness from frame to frame, and that moves the tracked edges.</li>
+  <li><b>If the frame rate is too low, shrink the <code>roi</code>.</b> A smaller crop is what buys frame rate.</li>
+</ul>
+
+<div class="note">
+<p><b>If the camera can't reach 90 Hz, you don't need to change anything.</b></p>
+<ul>
+  <li>Kinefly2 caps the request at the camera's maximum and uses the rate the camera reports.</li>
+  <li>The startup banner shows that rate, e.g. <code>rate: bottom 72.3 fps (asked 90)</code>, and it is saved with the videos and recordings.</li>
+  <li>Tracking works at any frame rate.</li>
+</ul>
+</div>
+
+<div class="warn"><p><b>First day on real hardware.</b> The live-camera code (crop, binning, trigger) has not yet run on a real FLIR camera <span class="ref">(README §6)</span>. Before you trust an experiment to it:</p>
+<ul>
+  <li>check the <i>max fps</i> that <code>list_cameras</code> reports;</li>
+  <li>run <code>check_latency</code>;</li>
+  <li>make a short test recording and look at it in the Scope.</li>
+</ul></div>
+
+<!-- ================================================================== 5 -->
+<h2><span class="num">5</span>Set up the tracking for a fly <span class="ref">(README §2.5, §2.6, §2.8)</span></h2>
+
+<pre><span class="p">$</span> python -m kinefly2.apps.run_rig config/rig.yaml --scope</pre>
+<p>This opens a live window for the bottom camera, with a toolbar and draggable handles, and a Kinefly2 Scope window with the traces. <b>Each time you release the mouse, the regions are saved</b> to <code>config/camera_bottom.yaml</code>, so the next start begins from the current tuning.</p>
+
+<ol>
+  <li><b>Background, with no fly in view.</b> Click <code>saveBG</code>. Then turn on subtraction for the wings (<code>subtract: LR</code>) and the abdomen (<code>subtract: A</code>).
+    <ul>
+      <li>The wings need it because faint wing blur only shows up against a subtracted background.</li>
+      <li>The abdomen needs it because otherwise the tracker reads the tether. In one test, abdomen noise dropped from 11° to 1.5° with subtraction on.</li>
+    </ul></li>
+  <li><b>Mount the fly, then click <code>autoplace</code>.</b> Every region moves to match the reference frame from the last tuning, so a fly mounted slightly differently needs at most a nudge. <code>reset</code> undoes it.</li>
+  <li><b>Wings.</b> Drag each wing hinge onto its wing base.
+    <ul>
+      <li>The two line handles set the angular window, and the two circle handles set the inner and outer radius.</li>
+      <li><b>0° is the line joining the two wing hinges</b>, so placing the hinges accurately sets the baseline.</li>
+      <li>With <code>symmetric</code> checked, editing one wing mirrors the other.</li>
+    </ul></li>
+  <li><b>Head: 4–6 landmarks.</b> Click <code>+H</code>, then click a feature; <code>-H</code> removes one. Where to put them:
+    <ul>
+      <li><b>only in front of the neck hinge.</b> Points behind it land on the thorax and forelegs, which move on their own;</li>
+      <li>on outline corners such as antennae, proboscis or the neck notch, <i>not</i> inside a uniform dark patch;</li>
+      <li>spread apart, in an irregular, non-symmetric pattern.</li>
+    </ul></li>
+  <li><b>Abdomen.</b> Put its hinge at the abdomen base, and set the window so it covers the abdomen. The tracker uses the abdomen's two side edges.</li>
+  <li><b>Zero.</b> When the fly is settled and holding a typical posture, click <code>zero</code>. The head angles are measured relative to this posture.</li>
+  <li><b>Check.</b> The overlay must show no warnings (table below), and the Scope traces should move with the fly.</li>
+</ol>
+
+<div class="cols">
+<div>
+<h3>Toolbar</h3>
+<table class="tight">
+  <tr><th>Button</th><th>What it does</th></tr>
+  <tr><td><code>exit</code></td><td>Quit (an active recording is closed cleanly)</td></tr>
+  <tr><td><code>saveBG</code></td><td>Current image becomes the background (no fly!)</td></tr>
+  <tr><td><code>autoplace</code> / <code>reset</code></td><td>Fit the regions to a new fly / undo</td></tr>
+  <tr><td><code>zero</code></td><td>Current head posture = 0</td></tr>
+  <tr><td><code>record</code></td><td>Start/stop a recording (template fields)</td></tr>
+  <tr><td><code>+H</code> / <code>-H</code></td><td>Add / remove a head landmark</td></tr>
+  <tr><td><code>track: H A L R … X</code></td><td>Parts on/off (X = aux intensity region)</td></tr>
+  <tr><td><code>subtract: H A LR X</code></td><td>Background subtraction per part</td></tr>
+  <tr><td><code>invertcolor</code></td><td>On for the bottom view (dark fly)</td></tr>
+  <tr><td><code>symmetric</code></td><td>Mirror left/right edits</td></tr>
+  <tr><td><code>angles</code></td><td>Extra readouts while tuning</td></tr>
+</table>
+</div>
+<div>
+<h3>Overlay warnings</h3>
+<table class="tight">
+  <tr><th>Message</th><th>Fix</th></tr>
+  <tr><td><code>2 edges (want 1)</code></td><td>The sector catches a second object; narrow its angle window or radii</td></tr>
+  <tr><td><code>NON-RIGID x px</code></td><td>The landmarks are not moving together; move any on glints or behind the neck</td></tr>
+  <tr><td><code>lmN BAD</code> (amber)</td><td>Move that landmark</td></tr>
+  <tr><td>red ring</td><td>The landmark is on a featureless spot; move it onto an edge or corner</td></tr>
+  <tr><td><code>AMBIGUOUS LAYOUT</code></td><td>The pattern is too symmetric; make it irregular</td></tr>
+  <tr><td><code>only N landmarks</code></td><td>Use at least 4</td></tr>
+  <tr><td><code>search 10->3</code></td><td>The landmarks are crowded; spread them out</td></tr>
+</table>
+</div>
+</div>
+
+<div class="warn"><p><b>Hind legs are experimental.</b> <code>leg_l3</code> and <code>leg_r3</code> are switched on in the current config, but they have not been shown to follow the leg. In tests they read the body margin instead <span class="ref">(README §2.6)</span>. Turn them off with their <code>track</code> boxes, or check that <code>bottom/leg_*_n_edges</code> is 1 on almost every frame before you use them.</p></div>
+
+<!-- ================================================================== 6 -->
+<h2><span class="num">6</span>Record during an experiment <span class="ref">(README §2.2–2.4)</span></h2>
+
+<h3>The experiment template</h3>
+<p>Copy <code>experiments/default.yaml</code> to <code>experiments/&lt;your project&gt;.yaml</code> and fill it in:</p>
+<ul>
+  <li><code>data_root</code>, <code>genotype</code>, <code>fly_id</code>, <code>protocol</code>, <code>notes</code>;</li>
+  <li><code>record_video</code> (raw video lets you re-analyze later) and <code>events_port</code>.</li>
+</ul>
+<p>Start the rig with it:</p>
+<pre><span class="p">$</span> python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/myproject.yaml --scope</pre>
+<p>Each recording gets its own folder, named <code>&lt;date&gt;_&lt;genotype&gt;_&lt;fly_id&gt;_&lt;protocol&gt;</code>. The name gets a <code>_2</code>, <code>_3</code>, … suffix if it already exists, so nothing is overwritten.</p>
+
+<h3>Three ways to start and stop a recording</h3>
+<table class="tight">
+  <tr><th style="width:24%">From</th><th>How</th></tr>
+  <tr><td>The camera window</td><td>Click <code>record</code>. It uses the template's fields, and a red <b>REC name m:ss</b> appears in the window.</td></tr>
+  <tr><td>A terminal</td><td><code>python -m kinefly2.apps.ctl start --fly 017 --protocol YAMV</code> · <code>... ctl stop</code> · <code>... ctl status</code></td></tr>
+  <tr><td><b>Your experiment script</b></td><td>The Python client, below. This is the recommended way, because the script can label every stimulus.</td></tr>
+</table>
+
+<pre><span class="c"># needs only pyzmq; kinefly2/client.py can be copied next to your script</span>
+import time
+from kinefly2.client import Kinefly2Client
+
+k = Kinefly2Client('localhost')                 <span class="c"># or the rig's IP if the script runs on another PC</span>
+print(k.status()['cameras'])                    <span class="c"># check: fps as expected, down: False</span>
+
+PATTERNS = [(1, 3.0), (2, 3.0), (3, 3.0)]       <span class="c"># (pattern ID, seconds)</span>
+
+with k.recording(fly_id='017', protocol='YAMV', notes='stripe fixation') as rec:
+    k.stim(0)                                   <span class="c"># baseline: no pattern</span>
+    for trial, (pid, dur) in enumerate(PATTERNS):
+        arena.show_pattern(pid)                 <span class="c"># PLACEHOLDER: your arena's Python API call</span>
+        k.stim(pid)                             <span class="c"># frames from now on are labelled with pid</span>
+        k.event({'trial': trial, 'event': 'stim_on', 'pattern': pid})
+        time.sleep(dur)
+        arena.stop()                            <span class="c"># PLACEHOLDER</span>
+        k.stim(0)
+        k.event({'trial': trial, 'event': 'stim_off'})
+<span class="c"># leaving the block stops the recording, even if the script crashes</span></pre>
+
+<ul>
+  <li><b><code>k.stim(value)</code></b> labels frames with the stimulus that is on.
+    <ul>
+      <li>Any number works, such as the pattern ID. It is <b>held until you change it</b>, so every row of <code>/merged/stim</code> says which stimulus was on at that frame.</li>
+      <li>Call it <b>right after</b> the arena call. The label is accurate to about ±1 frame (11 ms at 90 Hz).</li>
+      <li>The arena may take a moment to show a pattern after its call returns. If timing matters, measure that delay once.</li>
+    </ul></li>
+  <li><b><code>k.event(dict)</code></b> logs anything you like, timestamped on the same clock as the frames. Events are kept only while a recording is running.</li>
+  <li><b>The stimulus label carries over between recordings</b>, so set <code>k.stim(...)</code> at the start of each one.</li>
+  <li><b>Other calls:</b>
+    <ul>
+      <li><code>k.zero()</code> is the same as the <code>zero</code> button;</li>
+      <li><code>k.snapshot()</code> saves a PNG of the current frame;</li>
+      <li><code>k.status()</code> reports camera health and the recording in progress;</li>
+      <li><code>k.start(...)</code> / <code>k.stop()</code> work without a <code>with</code> block, and <code>stop()</code> returns a summary.</li>
+    </ul></li>
+  <li><b>MATLAB</b> can send the same commands as JSON over ZMQ, e.g. <code>{"cmd":"stim","value":2}</code> to port 5558 <span class="ref">(README §2.2)</span>.</li>
+</ul>
+
+<h3>Watching live</h3>
+<p>Use <code>--scope</code> on <code>run_rig</code>, as above, or <code>python -m kinefly2.apps.scope --live</code>. From another computer, use <code>python -m kinefly2.apps.scope --live tcp://&lt;rig-ip&gt;:5556</code>.</p>
+<p>Without installing anything on the viewing computer, use the browser dashboard: run <code>python -m kinefly2.apps.dashboard</code> on the rig, then open <code>http://&lt;rig&gt;:8000</code>.</p>
+<p>Stimulus changes and recording start/stop appear as markers on the traces.</p>
+
+<!-- ================================================================== 7 -->
+<h2><span class="num">7</span>Your data <span class="ref">(README §2.3, §3.4)</span></h2>
+
+<pre>~/Data/Kinefly2/260819/260819_XHCS_XHCS_017_YAMV/
+  260819_XHCS_XHCS_017_YAMV_flystate.h5        <span class="c">angles, timestamps, stimulus code, events</span>
+  260819_XHCS_XHCS_017_YAMV_bottom.avi         <span class="c">raw video (record_video: true)</span>
+  260819_XHCS_XHCS_017_YAMV_bottom_frames.csv  <span class="c">frame id and timestamps of each video frame</span>
+  260819_XHCS_XHCS_017_YAMV_events.jsonl       <span class="c">your events, as received</span>
+  260819_XHCS_XHCS_017_YAMV_experiment.yaml    <span class="c">the settings used</span>
+  configs/                                     <span class="c">copies of the rig and camera configs used</span></pre>
+
+<table class="tight">
+  <tr><th style="width:38%">HDF5 dataset (one row per frame)</th><th style="width:10%">Unit</th><th>Meaning</th></tr>
+  <tr><td><code>/bottom/t_camera</code></td><td>s</td><td>Time of each frame (camera clock); use it as the time axis</td></tr>
+  <tr><td><code>/bottom/left_angle</code>, <code>right_angle</code></td><td>rad</td><td>Wing stroke amplitude</td></tr>
+  <tr><td><code>/bottom/head_yaw</code></td><td>rad</td><td>Head yaw (exact from the ventral view)</td></tr>
+  <tr><td><code>/bottom/abdomen_angle</code></td><td>rad</td><td>Abdomen bending</td></tr>
+  <tr><td><code>/bottom/seq</code></td><td>–</td><td>Camera frame number; a gap means a dropped frame</td></tr>
+  <tr><td><code>/merged/stim</code></td><td>–</td><td>The <code>k.stim</code> value in force on that frame</td></tr>
+  <tr><td><code>/events/t_host</code>, <code>/events/text</code></td><td>s, text</td><td>Your events. <code>t_host</code> is on the same clock as <code>/bottom/t_host</code></td></tr>
+</table>
+<p>Angles are stored in <b>radians</b>; the GUI and Scope display degrees. <b>NaN</b> means the part was not found on that frame.</p>
+
+<div class="cols">
+<div>
+<pre>import h5py, numpy as np
+f = h5py.File('…_flystate.h5', 'r')
+t    = f['bottom/t_camera'][:]
+L    = np.degrees(f['bottom/left_angle'][:])
+R    = np.degrees(f['bottom/right_angle'][:])
+yaw  = np.degrees(f['bottom/head_yaw'][:])
+stim = f['merged/stim'][:]
+events = f['events/text'].asstr()[:]</pre>
+</div>
+<div>
+<pre><span class="c">% MATLAB</span>
+L = h5read(file, '/bottom/left_angle');
+stim = h5read(file, '/merged/stim');</pre>
+<p><b>View a file:</b> <code>python -m kinefly2.apps.scope &lt;file&gt;_flystate.h5</code>. Use <code>C</code> for measurement cursors.</p>
+<p><b>Re-track saved videos</b> with other settings: <code>python -m kinefly2.apps.analyze_videos</code>. It writes to a new folder and never changes the rig config <span class="ref">(README §2.1.2)</span>.</p>
+</div>
+</div>
+
+<!-- ================================================================== 8 -->
+<section class="keep">
+<h2><span class="num">8</span>Adding the front camera later <span class="ref">(README §2.1.1, §2.3, §2.5)</span></h2>
+<ul>
+  <li><b>Connect it.</b> Run <code>list_cameras</code>, paste the front camera's block into <code>config/camera_front.yaml</code>, and set <code>enabled: true</code> in <code>rig.yaml</code>.</li>
+  <li><b>Sync the two cameras.</b>
+    <ul>
+      <li>Use the same <code>fps</code> on both, with <code>trigger: {mode: primary}</code> on the bottom camera and <code>trigger: {mode: secondary}</code> on the front.</li>
+      <li>Wire the primary's output line to the secondary's trigger input, following FLIR's GPIO pinout for your model.</li>
+      <li>Without the trigger, the front frames can be up to one frame off.</li>
+    </ul></li>
+  <li><b>Front head landmarks</b> go on the eye edges, the bright patch between the eyes, and the antenna bases. Drag the <code>+pitch</code> arrow along the fly's dorsoventral axis.</li>
+  <li><b>Pitch and yaw from the front camera are in pixels until you calibrate each fly.</b> After the fly's first recording, run the command below. Then either restart <code>run_rig</code>, which reads the template only at start-up, or pass the value directly with <code>k.start(..., lever_px={'front': 48.2})</code>. That fly's later recordings then report degrees.
+<pre><span class="p">$</span> python -m kinefly2.apps.calibrate_fly &lt;recording_folder&gt; --write experiments/myproject.yaml</pre></li>
+  <li><b>STALE badge.</b> If the front camera falls behind by more than 55 ms, its values are saved as NaN instead of being repeated, and the windows show a <b>STALE</b> badge.</li>
+</ul>
+</section>
+
+</body>
+</html>
