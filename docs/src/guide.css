@@ -1,0 +1,193 @@
+/* Shared print style for the Kinefly2 guides (rendered to PDF by build_pdfs.sh). */
+
+:root {
+  --ink: #1d2327;
+  --muted: #5b6770;
+  --accent: #0f5e6e;
+  --accent-soft: #e6f1f3;
+  --rule: #d5dde1;
+  --code-bg: #f4f6f7;
+  --warn: #8a4b00;
+  --warn-bg: #fdf3e4;
+  --warn-rule: #e3b26b;
+}
+
+@page {
+  size: letter;
+  margin: 0.62in 0.66in 0.7in 0.66in;
+  @bottom-left {
+    content: "Kinefly2";
+    font: 7.5pt "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #8a959c;
+  }
+  @bottom-right {
+    content: counter(page) " / " counter(pages);
+    font: 7.5pt "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #8a959c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+body {
+  margin: 0;
+  background: #fff;
+  color: var(--ink);
+  font: 9.6pt/1.42 "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.doc-head {
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 7pt;
+  margin-bottom: 11pt;
+}
+.doc-head h1 {
+  font-size: 21pt;
+  line-height: 1.1;
+  margin: 0 0 3pt;
+  color: var(--accent);
+  letter-spacing: -0.2pt;
+}
+.doc-head .sub { font-size: 10.5pt; color: var(--muted); margin: 0; }
+.doc-head .meta { font-size: 8pt; color: var(--muted); margin-top: 4pt; }
+
+/* -------------------------------------------------------------- headings */
+
+h2 {
+  font-size: 12.5pt;
+  color: var(--accent);
+  margin: 15pt 0 5pt;
+  padding-bottom: 2pt;
+  border-bottom: 1px solid var(--rule);
+  break-after: avoid;
+}
+h2 .num {
+  display: inline-block;
+  min-width: 17pt;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 3pt;
+  text-align: center;
+  font-size: 9.5pt;
+  padding: 1pt 4pt;
+  margin-right: 6pt;
+  vertical-align: 1pt;
+}
+h3 {
+  font-size: 10.3pt;
+  margin: 10pt 0 3pt;
+  break-after: avoid;
+}
+h2 + p, h3 + p { margin-top: 2pt; }
+
+p { margin: 4pt 0; }
+ul, ol { margin: 3pt 0 5pt; padding-left: 16pt; }
+li { margin: 1.5pt 0; }
+li > ul, li > ol { margin: 1pt 0 2pt; }
+
+a { color: var(--accent); text-decoration: none; }
+.ref { color: var(--muted); font-size: 8.3pt; white-space: nowrap; }
+.muted { color: var(--muted); }
+
+/* ------------------------------------------------------------------ code */
+
+code {
+  font: 8.5pt Menlo, "SF Mono", Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.4pt 2.4pt;
+  border-radius: 2pt;
+  white-space: nowrap;
+}
+pre {
+  font: 8.1pt/1.38 Menlo, "SF Mono", Consolas, monospace;
+  background: var(--code-bg);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 3pt 3pt 0;
+  padding: 5pt 8pt;
+  margin: 4pt 0 6pt;
+  white-space: pre-wrap;
+  break-inside: avoid;
+}
+pre code { background: none; padding: 0; font: inherit; white-space: inherit; }
+pre .c { color: #6b7780; }          /* comment */
+pre .p { color: var(--accent); }    /* prompt */
+
+/* ---------------------------------------------------------------- tables */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4pt 0 7pt;
+  font-size: 8.9pt;
+  break-inside: avoid;
+}
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: 3pt 5pt;
+  border-bottom: 1px solid var(--rule);
+}
+th {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom: 1.5px solid var(--accent);
+}
+td code, th code { white-space: nowrap; }
+td.yes { color: #17703a; font-weight: 600; }
+td.no  { color: #9a3b2e; font-weight: 600; }
+table.tight td, table.tight th { padding: 2.2pt 5pt; }
+
+/* -------------------------------------------------------------- callouts */
+
+.note, .warn, .key {
+  border-radius: 3pt;
+  padding: 5pt 8pt;
+  margin: 6pt 0;
+  break-inside: avoid;
+}
+.note { background: var(--accent-soft); border-left: 3px solid var(--accent); }
+.warn { background: var(--warn-bg); border-left: 3px solid var(--warn-rule); }
+.warn b:first-child { color: var(--warn); }
+.key  { border: 1.5px solid var(--accent); }
+.note p, .warn p, .key p { margin: 2pt 0; }
+
+/* -------------------------------------------------------------- layout */
+
+.cols { display: flex; gap: 14pt; }
+.cols > * { flex: 1; min-width: 0; }
+.keep { break-inside: avoid; }
+.pb { break-before: page; }
+
+figure { margin: 6pt 0 8pt; break-inside: avoid; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption { font-size: 8pt; color: var(--muted); margin-top: 3pt; }
+
+/* ----------------------------------------------------------- checklists */
+
+ol.check { list-style: none; padding-left: 0; counter-reset: step; }
+ol.check > li {
+  counter-increment: step;
+  position: relative;
+  padding: 3pt 0 3pt 24pt;
+  border-bottom: 1px dotted var(--rule);
+  break-inside: avoid;
+}
+ol.check > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0; top: 3pt;
+  width: 15pt; height: 15pt;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 8pt;
+  line-height: 12.5pt;
+  text-align: center;
+}
+ol.check > li:last-child { border-bottom: none; }

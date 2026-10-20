@@ -5,6 +5,12 @@ wing stroke amplitude (WSA), head yaw/roll, abdomen angle, and an auxiliary
 intensity/wingbeat-frequency region, from one or two cameras at ~90 Hz, for
 closed-loop experiments.
 
+> **Short guides (PDF):** [Getting Started](docs/Kinefly2_Getting_Started.pdf)
+> for new users (install, hardware, first setup, recording; written for a
+> bottom-camera-only rig) and the two-page
+> [Daily Checklist](docs/Kinefly2_Daily_Checklist.pdf). Rebuild them from
+> `docs/src/` with `bash docs/src/build_pdfs.sh`.
+
 The image-processing core is ported from
 [Kinefly](https://github.com/ssafarik/Kinefly) (Safarik, Dickinson Lab) via
 [Benifly](https://github.com/bmslpsu/Benifly) (Cellini). The ROS layer is

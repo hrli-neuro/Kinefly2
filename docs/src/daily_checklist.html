@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kinefly2 Daily Checklist</title>
+<link rel="stylesheet" href="guide.css">
+<style>
+  body { font-size: 9.3pt; }
+  ol.check > li { padding-top: 2.6pt; padding-bottom: 2.6pt; }
+  h2 { margin-top: 11pt; }
+  @page { @bottom-left { content: "Kinefly2: Daily Checklist"; } }
+</style>
+</head>
+<body>
+
+<header class="doc-head">
+  <h1>Kinefly2: Daily Checklist</h1>
+  <p class="sub">Turning everything on before an experiment, changing things during the day, and shutting down.</p>
+  <p class="meta">For people already using Kinefly2. New users: start with <i>Kinefly2: Getting Started</i>. Code version 9ccc802, October 2026.</p>
+</header>
+
+<h2><span class="num">A</span>Before the experiment</h2>
+<ol class="check">
+  <li><b>Power on</b> the rig PC, the camera(s) and the IR backlight. <b>After a reboot</b>, run this unless it has been made permanent:<br>
+      <code>sudo sh -c 'echo 1000 &gt; /sys/module/usbcore/parameters/usbfs_memory_mb'</code></li>
+  <li><b>Open a terminal:</b> <code>cd Kinefly2</code> then <code>conda activate kinefly2</code>.</li>
+  <li><b>Check the template</b> <code>experiments/&lt;project&gt;.yaml</code>: <code>data_root</code>, <code>genotype</code>, <code>record_video</code>. Your script sets the fly ID and protocol for each recording.</li>
+  <li><b>Start Kinefly2</b> and leave it running all day:
+<pre><span class="p">$</span> python -m kinefly2.apps.run_rig config/rig.yaml --exp experiments/&lt;project&gt;.yaml --scope</pre>
+      <b>Bottom camera only:</b> set <code>front: enabled: false</code> in <code>config/rig.yaml</code>, or add <code>--cameras bottom</code> to the command. The banner should print <code>Kinefly2 up: cameras bottom, primary bottom</code>.</li>
+  <li><b>Health check:</b> <code>python -m kinefly2.apps.ctl status</code>. Each camera's <code>fps</code> should match the banner's <code>rate:</code> line, with <code>down: false</code>.</li>
+  <li><b>Background:</b> with <b>no fly in view</b>, click <code>saveBG</code>. Do this daily, and again whenever the light, camera or holder moves.</li>
+  <li><b>Mount the fly</b>, then click <code>autoplace</code>. Check three things:
+      <ul>
+        <li>the wing hinges sit on the wing bases;</li>
+        <li>the head landmarks are in front of the neck;</li>
+        <li>the overlay shows <b>no warnings</b>.</li>
+      </ul>
+      Nudge handles as needed.</li>
+  <li><b>Let the fly settle</b>, then click <code>zero</code>. This sets the head's zero posture.</li>
+  <li><b>Watch the Scope for a minute.</b> The traces should move with the fly, without long NaN gaps.</li>
+</ol>
+
+<h2><span class="num">B</span>Run the experiment</h2>
+<pre>import time
+from kinefly2.client import Kinefly2Client
+k = Kinefly2Client('localhost')             <span class="c"># rig IP if the script runs elsewhere</span>
+
+<span class="c"># the recording stops when this block ends, even after an error</span>
+with k.recording(fly_id='018', protocol='YAMV', notes=''):
+    k.stim(0)                               <span class="c"># baseline label (it persists between recordings)</span>
+    for trial, (pid, dur) in enumerate(PATTERNS):
+        arena.show_pattern(pid)             <span class="c"># your arena's API call (placeholder)</span>
+        k.stim(pid)                         <span class="c"># IMMEDIATELY after: frames now labelled pid</span>
+        k.event({'trial': trial, 'event': 'stim_on', 'pattern': pid})
+        time.sleep(dur)
+        arena.stop(); k.stim(0)</pre>
+<p class="muted">Without a script, use the <code>record</code> button, or <code>python -m kinefly2.apps.ctl start --fly 018 --protocol YAMV</code> and then <code>... ctl stop</code>. Data goes to <code>&lt;data_root&gt;/&lt;date&gt;/&lt;date&gt;_&lt;genotype&gt;_&lt;fly&gt;_&lt;protocol&gt;/</code>.</p>
+
+<h2 class="pb"><span class="num">C</span>Changing things during the day</h2>
+<table>
+  <tr><th style="width:25%">To change</th><th style="width:47%">Do this</th><th>Takes effect</th></tr>
+  <tr><td><b>Fly, protocol, notes, genotype</b></td><td>Pass them to <code>k.recording(...)</code> / <code>k.start(...)</code>, or use <code>ctl start --fly … --protocol … --genotype … --notes …</code></td><td>Next recording</td></tr>
+  <tr><td><b>Video on / off</b></td><td><code>k.start(..., record_video=False)</code> or <code>ctl start --no-video</code></td><td>Next recording</td></tr>
+  <tr><td><b>Stimuli</b> (patterns, order, durations)</td><td>Edit the pattern list in <b>your script</b>. Kinefly2 needs no change; just keep calling <code>k.stim(pid)</code> right after each arena call.</td><td>Next run of the script</td></tr>
+  <tr><td><b>Regions</b>: hinges, windows, landmarks, track / subtract boxes</td><td>Drag or click in the camera window. Saved to the camera YAML when you release the mouse. Change them <b>between</b> recordings, not during one.</td><td>Immediately</td></tr>
+  <tr><td><b>Head zero</b></td><td>The <code>zero</code> button, or <code>k.zero()</code>. It is logged as an event if a recording is running.</td><td>Immediately</td></tr>
+  <tr><td><b>New fly</b></td><td>New <code>fly_id</code>, then <code>autoplace</code>, check the overlay, <code>zero</code>. Re-take <code>saveBG</code> only if the light, camera or holder moved.</td><td>Next recording</td></tr>
+  <tr><td><b>Settings in files</b> (tracker, camera, template)</td><td>Edit <code>tracker:</code> / <code>camera:</code> in <code>config/camera_bottom.yaml</code>, or <code>experiments/&lt;project&gt;.yaml</code>. A restart keeps your regions, background and head templates.</td><td>After restarting <code>run_rig</code></td></tr>
+  <tr><td class="muted">Two cameras: <code>lever_px</code></td><td class="muted">Run <code>calibrate_fly &lt;recording&gt; --write …yaml</code> and restart, or pass <code>k.start(..., lever_px={'front': 48.2})</code>.</td><td class="muted">Next recording</td></tr>
+</table>
+
+<h2><span class="num">D</span>End of the day</h2>
+<ol class="check">
+  <li><b>Let the script finish.</b> Its <code>with</code> block stops the last recording.</li>
+  <li><b>Quit:</b> <code>q</code> or <code>exit</code> in a camera window (Ctrl+C with <code>--no-gui</code>). An open recording is closed cleanly.</li>
+  <li><b>Check and back up:</b> <code>python -m kinefly2.apps.scope &lt;folder&gt;/*_flystate.h5</code>, back up <code>&lt;data_root&gt;/&lt;date&gt;/</code>, then switch off the backlight.</li>
+</ol>
+
+<h2><span class="num">E</span>Quick fixes</h2>
+<table class="tight">
+  <tr><th style="width:33%">Symptom</th><th>Fix</th></tr>
+  <tr><td><code>no reply from Kinefly2 at …</code></td><td><code>run_rig</code> is not running, the host/IP is wrong, or a firewall blocks port 5558.</td></tr>
+  <tr><td><code>already recording …</code></td><td>The previous recording is still open. Run <code>k.stop()</code> or <code>ctl stop</code>.</td></tr>
+  <tr><td>Camera <code>down</code> / “reconnecting…”</td><td>It retries every 2 s. Check the USB cable; after a reboot run the <code>usbfs</code> line (A1).</td></tr>
+  <tr><td><code>list_cameras</code>: “in use or unavailable”</td><td>Close SpinView, or any other Kinefly2 holding the camera.</td></tr>
+  <tr><td><code>reaches only … fps</code> at start</td><td>Make <code>roi</code> smaller, or <code>exposure_us</code> shorter than one frame.</td></tr>
+  <tr><td><code>REC stop … LOG DROPPED</code></td><td>The disk is too slow. Record to a local SSD, or turn video off.</td></tr>
+  <tr><td>Traces noisy, jumping or NaN</td><td>Fix the overlay warning (Getting Started §5); re-take <code>saveBG</code> with no fly.</td></tr>
+  <tr><td><b>STALE</b> badge (two cameras)</td><td>The front camera is falling behind. Check its cable and the trigger wiring.</td></tr>
+</table>
+
+</body>
+</html>
