@@ -80,6 +80,10 @@ class RecordingSession:
                 meta = {'lever_px': exp.lever_px or {}, 'landmarks': {},
                         'rig': {'primary': self.merger.primary,
                                 'cameras': list(self.pipelines),
+                                # What each camera actually delivered, not the
+                                # config's request (see PySpinSource).
+                                'fps': {c: getattr(p.source, 'fps', None)
+                                        for c, p in self.pipelines.items()},
                                 'parts': {c: v.part_names() for c, v in self.views.items()
                                           if hasattr(v, 'part_names')},
                                 'stale_after_s': self.merger.stale_after_s},

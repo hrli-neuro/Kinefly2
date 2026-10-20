@@ -9,6 +9,13 @@ Latency-critical settings:
   frames and silently adds latency whenever processing briefly falls behind.
 - Manual exposure/gain: auto modes vary the exposure time frame-to-frame.
 
+FRAME RATE. `fps` is a request. A camera that cannot reach it (crop too large
+for the USB link, exposure longer than the frame interval) is set to its
+maximum instead, and `self.fps` is then what the camera reports it will
+actually deliver -- which is what the video recorder writes into the AVI
+header and what the staleness threshold is derived from. Trusting the request
+would label a 72 Hz video as 90 Hz and stretch every re-analysis time axis.
+
 On Linux with two USB3 cameras, raise the USB-FS memory limit if enumeration
 or streaming fails:  sudo sh -c 'echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb'
 """
@@ -25,7 +32,8 @@ class PySpinSource(FrameSource):
     def __init__(self, serial=None, fps=90.0, exposure_us=None, gain_db=None,
                  roi=None, binning=None, pixel_format='Mono8', trigger=None):
         self.serial = str(serial) if serial is not None else None
-        self.fps = fps
+        self.fps_requested = fps     # What the config asked for.
+        self.fps = fps               # What the camera delivers, once open() has read it back.
         self.exposure_us = exposure_us
         self.gain_db = gain_db
         self.roi = dict(roi) if roi else None          # {width, height, offset_x, offset_y}
@@ -85,14 +93,61 @@ class PySpinSource(FrameSource):
         if self.gain_db is not None:
             self.cam.GainAuto.SetValue(PySpin.GainAuto_Off)
             self.cam.Gain.SetValue(float(self.gain_db))
-        if self.fps is not None:
-            try:
-                self.cam.AcquisitionFrameRateEnable.SetValue(True)
-                self.cam.AcquisitionFrameRate.SetValue(float(self.fps))
-            except PySpin.SpinnakerException:
-                pass  # Some models expose this differently; free-run instead.
+        # Last: ROI, binning and exposure all lower the rate the camera can reach.
+        self._apply_frame_rate()
 
         self.cam.BeginAcquisition()
+
+    def _apply_frame_rate(self):
+        """Request `fps_requested`, capped at what the camera can do, then read
+        back the rate it will actually deliver into `self.fps`.
+
+        A secondary camera's frames come from the primary's trigger, so its
+        nominal rate stays the requested one (it must match the primary); the
+        read-back only tells whether it can keep up."""
+        PySpin = self.PySpin
+        want = self.fps_requested
+        if want is not None:
+            try:
+                self.cam.AcquisitionFrameRateEnable.SetValue(True)
+                node = self.cam.AcquisitionFrameRate
+                node.SetValue(min(float(want), float(node.GetMax())))
+            except (PySpin.SpinnakerException, AttributeError) as e:
+                print('camera %s: could not set the frame rate (%s); it free-runs'
+                      % (self.serial or '', str(e).split('\n')[0]))
+        actual = self._read_frame_rate()
+        secondary = (self.trigger or {}).get('mode') == 'secondary'
+        if want is not None and (secondary or actual is None):
+            self.fps = float(want)
+        else:
+            self.fps = actual
+        if want is not None and actual is not None and actual < 0.99 * float(want):
+            frame_us = 1e6 / float(want)
+            if self.exposure_us and float(self.exposure_us) >= frame_us:
+                why = 'exposure_us %g is longer than a %g fps frame (%.0f us)' % (
+                    self.exposure_us, want, frame_us)
+            else:
+                why = 'usually the crop (roi) is too large for the link; shrink it'
+            if secondary:
+                print('camera %s: can reach only %.1f fps, below the %g fps trigger it '
+                      'must follow (%s)' % (self.serial or '', actual, want, why))
+            else:
+                print('camera %s: reaches only %.1f fps, not the %g requested -- running '
+                      'at %.1f (%s)' % (self.serial or '', actual, want, actual, why))
+        return self.fps
+
+    def _read_frame_rate(self):
+        """The frame rate the camera says it will deliver with the current
+        settings, or None when it does not say."""
+        PySpin = self.PySpin
+        for name in ('AcquisitionResultingFrameRate', 'AcquisitionFrameRate'):
+            try:
+                value = float(getattr(self.cam, name).GetValue())
+            except (PySpin.SpinnakerException, AttributeError):
+                continue
+            if value > 0:
+                return value
+        return None
 
     def _apply_roi(self):
         """Crop the sensor. This is usually what buys the frame rate: a smaller
