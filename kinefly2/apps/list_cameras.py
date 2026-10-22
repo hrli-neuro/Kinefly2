@@ -27,20 +27,27 @@ def _node_value(nodemap, name, kind='int'):
             node = PySpin.CIntegerPtr(nodemap.GetNode(name))
         elif kind == 'float':
             node = PySpin.CFloatPtr(nodemap.GetNode(name))
+        elif kind == 'enum':
+            node = PySpin.CEnumerationPtr(nodemap.GetNode(name))
         else:
             node = PySpin.CStringPtr(nodemap.GetNode(name))
         if not PySpin.IsAvailable(node) or not PySpin.IsReadable(node):
             return None
+        if kind == 'enum':
+            return node.GetCurrentEntry().GetSymbolic()
         return node.GetValue()
     except Exception:
         return None
 
 
-def _node_max(nodemap, name):
+def _node_max(nodemap, name, kind='int'):
     import PySpin
 
     try:
-        node = PySpin.CIntegerPtr(nodemap.GetNode(name))
+        if kind == 'int':
+            node = PySpin.CIntegerPtr(nodemap.GetNode(name))
+        else:
+            node = PySpin.CFloatPtr(nodemap.GetNode(name))
         if not PySpin.IsAvailable(node):
             return None
         return node.GetMax()
@@ -57,8 +64,8 @@ def describe(cam):
         'serial': _node_value(tl, 'DeviceSerialNumber', 'str'),
         'model': _node_value(tl, 'DeviceModelName', 'str'),
         'vendor': _node_value(tl, 'DeviceVendorName', 'str'),
-        'interface': _node_value(tl, 'DeviceCurrentSpeed', 'str') or
-                     _node_value(tl, 'DeviceType', 'str'),
+        'interface': _node_value(tl, 'DeviceCurrentSpeed', 'enum') or
+                     _node_value(tl, 'DeviceType', 'enum'),
     }
     try:
         cam.Init()
@@ -71,12 +78,17 @@ def describe(cam):
         nm = cam.GetNodeMap()
         info['width'] = _node_value(nm, 'Width')
         info['height'] = _node_value(nm, 'Height')
-        info['width_max'] = _node_max(nm, 'WidthMax') or _node_max(nm, 'Width')
-        info['height_max'] = _node_max(nm, 'HeightMax') or _node_max(nm, 'Height')
+        # WidthMax's value is the sensor width; its own maximum is just the
+        # node's type limit (65535).
+        info['width_max'] = _node_value(nm, 'WidthMax') or _node_max(nm, 'Width')
+        info['height_max'] = _node_value(nm, 'HeightMax') or _node_max(nm, 'Height')
         info['fps'] = _node_value(nm, 'AcquisitionFrameRate', 'float')
         # The ceiling at the CURRENT ROI: shrink the ROI and this goes up,
-        # which is usually how a USB3 pair reaches 90 Hz.
-        info['fps_max'] = _node_value(nm, 'AcquisitionResultingFrameRate', 'float')
+        # which is usually how a USB3 pair reaches 90 Hz. First-generation
+        # cameras have no resulting-rate node; the rate node's maximum is the
+        # same ceiling.
+        info['fps_max'] = (_node_value(nm, 'AcquisitionResultingFrameRate', 'float') or
+                           _node_max(nm, 'AcquisitionFrameRate', 'float'))
         info['exposure_us'] = _node_value(nm, 'ExposureTime', 'float')
         info['gain_db'] = _node_value(nm, 'Gain', 'float')
     finally:
@@ -155,6 +167,8 @@ def main():
                 continue
             if info.get('interface'):
                 print('    link:       %s' % info['interface'])
+                if info['interface'] in ('HighSpeed', 'FullSpeed'):
+                    print('                USB 2 speed: use a USB 3 port and cable')
             if info.get('width'):
                 print('    resolution: %sx%s  (sensor max %sx%s)'
                       % (info['width'], info['height'],

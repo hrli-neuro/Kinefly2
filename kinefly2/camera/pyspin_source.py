@@ -109,7 +109,7 @@ class PySpinSource(FrameSource):
         want = self.fps_requested
         if want is not None:
             try:
-                self.cam.AcquisitionFrameRateEnable.SetValue(True)
+                self._enable_frame_rate_control()
                 node = self.cam.AcquisitionFrameRate
                 node.SetValue(min(float(want), float(node.GetMax())))
             except (PySpin.SpinnakerException, AttributeError) as e:
@@ -135,6 +135,35 @@ class PySpinSource(FrameSource):
                 print('camera %s: reaches only %.1f fps, not the %g requested -- running '
                       'at %.1f (%s)' % (self.serial or '', actual, want, actual, why))
         return self.fps
+
+    def _enable_frame_rate_control(self):
+        """Make AcquisitionFrameRate writable.
+
+        Blackfly S and later have one switch, AcquisitionFrameRateEnable.
+        First-generation Point Grey cameras (Blackfly BFLY-U3, Flea3,
+        Chameleon3) have instead AcquisitionFrameRateAuto, which holds the
+        rate while it is Continuous (their default), and
+        AcquisitionFrameRateEnabled. PySpin has no attributes for those two,
+        so they are set through the node map."""
+        PySpin = self.PySpin
+        try:
+            self.cam.AcquisitionFrameRateEnable.SetValue(True)
+            return
+        except (PySpin.SpinnakerException, AttributeError):
+            pass
+        nodemap = self.cam.GetNodeMap()
+
+        def writable(name):
+            node = nodemap.GetNode(name)
+            return node if node is not None and PySpin.IsWritable(node) else None
+
+        auto = writable('AcquisitionFrameRateAuto')
+        if auto is not None:
+            auto = PySpin.CEnumerationPtr(auto)
+            auto.SetIntValue(auto.GetEntryByName('Off').GetValue())
+        enabled = writable('AcquisitionFrameRateEnabled')
+        if enabled is not None:
+            PySpin.CBooleanPtr(enabled).SetValue(True)
 
     def _read_frame_rate(self):
         """The frame rate the camera says it will deliver with the current
