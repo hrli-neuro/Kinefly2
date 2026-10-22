@@ -96,7 +96,7 @@
 <span class="p">$</span> conda create -n kinefly2 python=3.10        <span class="c"># 3.10: FLIR's PySpin wheels support only some versions</span>
 <span class="p">$</span> conda activate kinefly2
 <span class="p">$</span> pip install numpy opencv-python pyyaml pyzmq h5py
-<span class="p">$</span> pip install PySide6 pyqtgraph                <span class="c"># Kinefly2 Scope (trace viewer)</span>
+<span class="p">$</span> pip install "PySide6&lt;6.12" pyqtgraph         <span class="c"># Kinefly2 Scope (trace viewer)</span>
 <span class="p">$</span> python tests/test_tracking.py                <span class="c"># expects wings r=1.000, head r~0.99; no camera needed</span>
 <span class="p">$</span> python tests/test_dual_pipeline.py</pre>
 

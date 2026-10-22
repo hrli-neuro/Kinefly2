@@ -48,7 +48,8 @@ conda activate kinefly2
 
 # 3. Install dependencies
 pip install numpy opencv-python pyyaml pyzmq h5py
-pip install PySide6 pyqtgraph        # Kinefly2 Scope and the traces figures (section 2.4.1)
+pip install "PySide6<6.12" pyqtgraph # Kinefly2 Scope and the traces figures (section 2.4.1);
+                                     # PySide6 6.12.0 crashes the Scope on Python 3.10
 
 # 4. Verify: run the test suite (generates a synthetic fly video and checks
 #    tracked angles against ground truth; needs no camera)
@@ -239,8 +240,8 @@ Every analysis then saves a **figure of all its traces**, `<name>_traces.png`,
 and, with windows on, **opens in Kinefly2 Scope** (section 2.4.1). The first
 analysis opens the Scope; later ones arrive in it as new tabs, and the window
 stays open after `analyze_videos` ends. Both need the Scope installed
-(`pip install PySide6 pyqtgraph`); without it the analysis runs as before and
-the record notes that no figure was drawn.
+(`pip install "PySide6<6.12" pyqtgraph`); without it the analysis runs as
+before and the record notes that no figure was drawn.
 
 What is saved: one flat folder, every file labeled with the run and, where it
 belongs to one camera, the camera (`bottom`, `front`):
@@ -519,7 +520,7 @@ frame clock.
 #### 2.4.1 Kinefly2 Scope (desktop)
 
 ```bash
-pip install PySide6 pyqtgraph                      # once; the rig too (Linux wheels exist)
+pip install "PySide6<6.12" pyqtgraph               # once; the rig too (6.12.0 crashes the Scope)
 python -m kinefly2.apps.scope                       # empty window: File > Open, or drop files on it
 python -m kinefly2.apps.scope <run>_flystate.h5     # one tab per file
 python -m kinefly2.apps.scope --live                # this machine's run_rig (tcp://localhost:5556)

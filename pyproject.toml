@@ -20,8 +20,9 @@ dependencies = [
 # from flir.com matching the rig's Python version.
 panels = ["pyserial"]
 # Kinefly2 Scope (the trace viewer) and the traces figure saved after each
-# offline analysis.
-scope = ["PySide6>=6.5", "pyqtgraph>=0.13.7"]
+# offline analysis. PySide6 6.12.0 crashes the Scope window on Python 3.10
+# ("Fatal Python error: none_dealloc: deallocating None"); 6.11.2 works.
+scope = ["PySide6>=6.5,<6.12", "pyqtgraph>=0.13.7"]
 
 [tool.setuptools.packages.find]
 include = ["kinefly2*"]

@@ -12,7 +12,7 @@ cursors and the stimulus/recording/event markers. Opening files while a Scope
 is already running hands them to that window as new tabs (this is how each
 offline analysis shows up in one window); --new opens a separate window.
 
-Needs PySide6 and pyqtgraph (pip install PySide6 pyqtgraph). README section 2.4.1.
+Needs PySide6 and pyqtgraph (pip install "PySide6<6.12" pyqtgraph). README section 2.4.1.
 """
 import argparse
 import os
