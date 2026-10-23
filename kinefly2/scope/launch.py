@@ -13,7 +13,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULT_LIVE = 'tcp://localhost:5556'
-INSTALL_HINT = 'pip install PySide6 pyqtgraph'
+INSTALL_HINT = 'pip install "PySide6<6.12" pyqtgraph'   # 6.12.0 crashes the Scope on Python 3.10
 
 
 def available():

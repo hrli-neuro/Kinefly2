@@ -8,3 +8,5 @@ background_*.png
 reference_*.png
 *.yaml.bak
 .DS_Store
+*.egg-info/
+.claude/worktrees/

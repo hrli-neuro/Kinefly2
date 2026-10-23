@@ -476,7 +476,8 @@ def test_camera_config_plumbing():
     assert plain.roi is None and plain.trigger is None and plain.binning is None
     print('pyspin config plumbing: roi/trigger/binning reach the source, absent when unset')
 
-    # The shipped configs still parse with the commented pyspin block in them.
+    # The shipped configs still parse with the commented pyspin block in them,
+    # and on a rig, with that block swapped in for the video lines.
     import yaml
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for name in ('camera_bottom.yaml', 'camera_front.yaml'):
@@ -484,7 +485,7 @@ def test_camera_config_plumbing():
         if not os.path.exists(path):
             continue
         cfg = yaml.safe_load(open(path))
-        assert cfg['camera']['kind'] == 'video', cfg['camera']
+        assert cfg['camera']['kind'] in ('video', 'pyspin'), cfg['camera']
         assert 'list_cameras' in open(path).read(), '%s lost its setup comment' % name
     print('shipped camera configs parse and keep their setup comments')
 
